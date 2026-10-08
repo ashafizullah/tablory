@@ -1,8 +1,28 @@
-<p align="center"><img src="design/icon.png" width="96" alt="Tablory icon"></p>
+<p align="center">
+  <img src="design/icon.png" width="128" alt="Tablory icon">
+</p>
 
 <h1 align="center">Tablory</h1>
 
-<p align="center">Free, open-source, native database manager for macOS and Windows. Built with Tauri 2 and Svelte 5.</p>
+<p align="center">
+  A free, open-source, native database manager for macOS and Windows. PostgreSQL, MySQL, SQL Server, SQLite, Redis and MongoDB in one small app.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ashafizullah/tablory/actions/workflows/ci.yml"><img src="https://github.com/ashafizullah/tablory/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/ashafizullah/tablory/releases/latest"><img src="https://img.shields.io/github/v/release/ashafizullah/tablory?include_prereleases&label=release" alt="Release"></a>
+  <a href="https://github.com/ashafizullah/tablory/releases"><img src="https://img.shields.io/github/downloads/ashafizullah/tablory/total?color=2563eb" alt="Downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/ashafizullah/tablory?color=blue" alt="MIT License"></a>
+  <br>
+  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white" alt="Svelte 5">
+  <img src="https://img.shields.io/badge/Rust-stable-000000?logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="macOS | Windows">
+</p>
+
+<p align="center">
+  <a href="https://trakteer.id/adamshafizullah/tip"><img src="https://img.shields.io/badge/Buy%20me%20an%20AI%20token-Trakteer-C02E2E?style=for-the-badge" alt="Buy me an AI token on Trakteer"></a>
+</p>
 
 ## Download
 
@@ -62,6 +82,16 @@ Without `TABLORY_TEST_DOCKER` only the unit tests and the SQLite test run.
 1. Add the updater signing key as the repository secret `TAURI_SIGNING_PRIVATE_KEY` (contents of `~/.tauri/tablory.key`, empty password).
 2. Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, and add a `## <version>` section to `CHANGELOG.md`.
 3. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The workflow builds a draft release; publish it when it looks right.
+
+## Support
+
+Tablory is free and always will be. If it saves you time, **[buy me an AI token on Trakteer](https://trakteer.id/adamshafizullah/tip)** ☕🤖. It keeps this project being developed.
+
+<p align="center">
+  <a href="https://trakteer.id/adamshafizullah/tip"><img src="design/trakteer-qr.png" width="200" alt="QR code: trakteer.id/adamshafizullah/tip"></a>
+  <br>
+  <sub>Scan to support on Trakteer</sub>
+</p>
 
 ## License
 
