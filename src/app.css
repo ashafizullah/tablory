@@ -1,0 +1,152 @@
+/* Native-feeling desktop tool: follows the OS theme, one accent (selection and
+   primary actions), flat surfaces. Edit-state colors mark real pending changes. */
+:root {
+  --bg: #f6f6f7;
+  --panel: #ffffff;
+  --sidebar: #eeeef1;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --border: #d9d9de;
+  --grid-line: #ececf0;
+  --hover: #e6e6eb;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --selection: #dbe6fd;
+  --danger: #d70015;
+  --edited: #fff4c2;
+  --inserted: #dcf5df;
+  --deleted: #fde0e0;
+  --null: #a1a1a6;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --syn-keyword: #a626a4;
+  --syn-string: #2f8a3b;
+  --syn-number: #b35c00;
+  --syn-comment: #8e8e93;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --panel: #232325;
+    --sidebar: #2a2a2d;
+    --text: #f2f2f7;
+    --muted: #a1a1a6;
+    --border: #3a3a3c;
+    --grid-line: #2f2f32;
+    --hover: #353538;
+    --accent: #3b82f6;
+    --selection: #23365c;
+    --danger: #ff6961;
+    --edited: #4a3f12;
+    --inserted: #183d22;
+    --deleted: #4d1f22;
+    --null: #6e6e73;
+    --syn-keyword: #d68cf0;
+    --syn-string: #8fd18c;
+    --syn-number: #f0b36a;
+    --syn-comment: #7c7c82;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btn {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+.btn.danger {
+  color: var(--danger);
+}
+.btn.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.field {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  min-width: 0;
+}
+.field::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
+}
+.field:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+select.field {
+  padding-right: 4px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error-text {
+  color: var(--danger);
+  white-space: pre-wrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.kbd {
+  font-size: 11px;
+  color: var(--muted);
+}

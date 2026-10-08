@@ -1,0 +1,40 @@
+# Local databases for development and integration tests:
+#   docker compose -f dev/docker-compose.yml up -d
+# Ports are published for direct connections; "bastion" reaches the same
+# databases by service name, for testing SSH tunnels.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: tablory
+      POSTGRES_DB: shop
+    ports: ["54329:5432"]
+    volumes: ["./seed/postgres.sql:/docker-entrypoint-initdb.d/seed.sql:ro"]
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: tablory
+      MYSQL_DATABASE: shop
+    ports: ["33069:3306"]
+    volumes: ["./seed/mysql.sql:/docker-entrypoint-initdb.d/seed.sql:ro"]
+  mssql:
+    # amd64 image; on Apple Silicon Docker Desktop runs it through Rosetta.
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Tablory!2026"
+    ports: ["14339:1433"]
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "tablory"]
+    ports: ["63799:6379"]
+  mongo:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: tablory
+    ports: ["27019:27017"]
+  bastion:
+    build: ./ssh
+    ports: ["22229:22"]

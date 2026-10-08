@@ -1,0 +1,47 @@
+[package]
+name = "tablory"
+version = "0.1.0"
+description = "Free, open-source, native database manager"
+authors = ["Tablory contributors"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+# The `_lib` suffix avoids a name clash between the lib and bin on Windows,
+# see https://github.com/rust-lang/cargo/issues/8519
+name = "tablory_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+async-trait = "0.1"
+anyhow = "1"
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+base64 = "0.22"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "chrono", "json", "uuid", "rust_decimal"] }
+rust_decimal = "1"
+russh = "0.64"
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono", "rust_decimal"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+redis = { version = "1", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "connection-manager"] }
+mongodb = "3"
+json5 = "0.4"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

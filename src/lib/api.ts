@@ -1,0 +1,70 @@
+import { invoke } from "@tauri-apps/api/core";
+import type {
+  ConnectionProfile,
+  ExecuteResult,
+  FindResult,
+  RedisKey,
+  RedisValue,
+  ResultSet,
+  RowChange,
+  RowsRequest,
+  Secrets,
+  SessionInfo,
+  TableInfo,
+  TableRef,
+  TableStructure,
+} from "./types";
+
+export { invoke };
+
+export const isMac = navigator.userAgent.includes("Mac");
+
+export const api = {
+  listConnections: () => invoke<ConnectionProfile[]>("list_connections"),
+  saveConnection: (profile: ConnectionProfile, secrets: Secrets) =>
+    invoke<ConnectionProfile>("save_connection", { profile, secrets }),
+  deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
+  testConnection: (profile: ConnectionProfile, secrets: Secrets) =>
+    invoke<string>("test_connection", { profile, secrets }),
+  connect: (id: string) => invoke<SessionInfo>("connect", { id }),
+  disconnect: (session: string) => invoke<void>("disconnect", { session }),
+  switchDatabase: (session: string, database: string) =>
+    invoke<string>("switch_database", { session, database }),
+  listDatabases: (session: string) => invoke<string[]>("list_databases", { session }),
+  listSchemas: (session: string) => invoke<string[]>("list_schemas", { session }),
+  listTables: (session: string, schema: string) => invoke<TableInfo[]>("list_tables", { session, schema }),
+  tableStructure: (session: string, table: TableRef) =>
+    invoke<TableStructure>("table_structure", { session, table }),
+  fetchRows: (session: string, request: RowsRequest) => invoke<ResultSet>("fetch_rows", { session, request }),
+  countRows: (session: string, request: RowsRequest) => invoke<number>("count_rows", { session, request }),
+  execute: (session: string, sql: string, maxRows: number, queryId: string) =>
+    invoke<ExecuteResult>("execute", { session, sql, maxRows, queryId }),
+  cancelQuery: (session: string, queryId: string) => invoke<void>("cancel_query", { session, queryId }),
+  previewChanges: (session: string, table: TableRef, changes: RowChange[]) =>
+    invoke<string>("preview_changes", { session, table, changes }),
+  applyChanges: (session: string, table: TableRef, changes: RowChange[]) =>
+    invoke<number>("apply_changes", { session, table, changes }),
+  pickFile: (create: boolean) => invoke<string | null>("pick_file", { create }),
+
+  redisScan: (session: string, cursor: string, pattern: string, count: number) =>
+    invoke<{ cursor: string; keys: RedisKey[] }>("redis_scan", { session, cursor, pattern, count }),
+  redisGet: (session: string, key: string) => invoke<RedisValue>("redis_get", { session, key }),
+  redis: (session: string, ...args: string[]) => invoke<unknown>("redis_command", { session, args }),
+  redisLine: (session: string, line: string) => invoke<unknown>("redis_command", { session, line }),
+
+  mongoFind: (session: string, db: string, collection: string, filter: string, sort: string, skip: number, limit: number) =>
+    invoke<FindResult>("mongo_find", { session, db, collection, filter, sort, skip, limit }),
+  mongoCount: (session: string, db: string, collection: string, filter: string) =>
+    invoke<number>("mongo_count", { session, db, collection, filter }),
+  mongoInsert: (session: string, db: string, collection: string, doc: string) =>
+    invoke<unknown>("mongo_insert", { session, db, collection, doc }),
+  mongoReplace: (session: string, db: string, collection: string, id: string, doc: string) =>
+    invoke<void>("mongo_replace", { session, db, collection, id, doc }),
+  mongoDelete: (session: string, db: string, collection: string, ids: string[]) =>
+    invoke<number>("mongo_delete", { session, db, collection, ids }),
+  mongoCommand: (session: string, db: string, command: string) =>
+    invoke<unknown>("mongo_command", { session, db, command }),
+};
+
+/** Tauri rejects with the Rust error string. */
+export const errorText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : String(e));
