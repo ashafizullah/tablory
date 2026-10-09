@@ -13,6 +13,8 @@ export interface SshConfig {
 export interface ConnectionProfile {
   id: string;
   name: string;
+  /** Folder in the connection list; "" means ungrouped. */
+  group: string;
   kind: DbKind;
   color: string;
   host: string;

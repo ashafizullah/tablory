@@ -18,6 +18,7 @@ interface Confirm {
 
 class AppState {
   connections = $state<ConnectionProfile[]>([]);
+  groups = $state<string[]>([]);
   session = $state<SessionInfo | null>(null);
   connecting = $state<string | null>(null);
   connectError = $state<string | null>(null);
@@ -36,7 +37,7 @@ class AppState {
   confirm = $state<Confirm | null>(null);
 
   async loadConnections() {
-    this.connections = await api.listConnections();
+    [this.connections, this.groups] = await Promise.all([api.listConnections(), api.listGroups()]);
   }
 
   ask(message: string, opts: { detail?: string; ok?: string; danger?: boolean } = {}): Promise<boolean> {

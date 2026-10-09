@@ -23,6 +23,11 @@ export const api = {
   listConnections: () => invoke<ConnectionProfile[]>("list_connections"),
   saveConnection: (profile: ConnectionProfile, secrets: Secrets) =>
     invoke<ConnectionProfile>("save_connection", { profile, secrets }),
+  listGroups: () => invoke<string[]>("list_groups"),
+  createGroup: (name: string) => invoke<string>("create_group", { name }),
+  renameGroup: (from: string, to: string) => invoke<void>("rename_group", { from, to }),
+  deleteGroup: (name: string) => invoke<void>("delete_group", { name }),
+  moveConnection: (id: string, group: string) => invoke<void>("move_connection", { id, group }),
   deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
   testConnection: (profile: ConnectionProfile, secrets: Secrets) =>
     invoke<string>("test_connection", { profile, secrets }),
@@ -44,6 +49,7 @@ export const api = {
     invoke<string>("preview_changes", { session, table, changes }),
   applyChanges: (session: string, table: TableRef, changes: RowChange[]) =>
     invoke<number>("apply_changes", { session, table, changes }),
+  importNavicat: () => invoke<{ imported: number; skipped: string[] } | null>("import_navicat"),
   pickFile: (create: boolean) => invoke<string | null>("pick_file", { create }),
 
   redisScan: (session: string, cursor: string, pattern: string, count: number) =>

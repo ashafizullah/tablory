@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Connection groups: right-click the connection list to create, rename or delete groups; drag connections between groups.
+- Import connections from a Navicat export (`.ncx`), including saved passwords.
+
 ## 0.1.0
 
 - PostgreSQL, MySQL / MariaDB, SQL Server, SQLite, Redis and MongoDB connections, optionally through an SSH tunnel.

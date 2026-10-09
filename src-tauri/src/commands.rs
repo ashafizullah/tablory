@@ -9,6 +9,7 @@ use crate::db::{
 };
 use crate::docdb::FindResult;
 use crate::kv::{self, KeyValue, ScanPage};
+use crate::navicat;
 use crate::session::{Backend, SessionInfo};
 use crate::AppState;
 
@@ -35,10 +36,72 @@ pub fn save_connection(
 }
 
 #[tauri::command]
+pub fn list_groups(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
+    state.store.groups().map_err(err)
+}
+
+#[tauri::command]
+pub fn create_group(state: State<'_, AppState>, name: String) -> CmdResult<String> {
+    state.store.create_group(&name).map_err(err)
+}
+
+#[tauri::command]
+pub fn rename_group(state: State<'_, AppState>, from: String, to: String) -> CmdResult<()> {
+    state.store.rename_group(&from, &to).map_err(err)
+}
+
+#[tauri::command]
+pub fn delete_group(state: State<'_, AppState>, name: String) -> CmdResult<()> {
+    state.store.delete_group(&name).map_err(err)
+}
+
+#[tauri::command]
+pub fn move_connection(state: State<'_, AppState>, id: String, group: String) -> CmdResult<()> {
+    state.store.move_connection(&id, &group).map_err(err)
+}
+
+#[tauri::command]
 pub fn delete_connection(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state.store.delete(&id).map_err(err)?;
     connections::delete_secrets(&id);
     Ok(())
+}
+
+/// Asks for a Navicat `.ncx` export and saves its connections. Connections
+/// whose name already exists are skipped, so importing twice is harmless.
+/// `None` when the dialog is cancelled.
+#[tauri::command]
+pub async fn import_navicat(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<Option<navicat::ImportReport>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Navicat connections", &["ncx"])
+        .pick_file(move |p| {
+            let _ = tx.send(p.and_then(|p| p.into_path().ok()));
+        });
+    let Some(path) = rx.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let xml = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let (items, mut skipped) = navicat::parse(&xml).map_err(err)?;
+    let existing = state.store.list().map_err(err)?;
+    let mut imported = 0;
+    for item in items {
+        let name = &item.profile.name;
+        if existing.iter().any(|c| &c.name == name) {
+            skipped.push(format!(
+                "{name}: a connection with this name already exists"
+            ));
+            continue;
+        }
+        let saved = state.store.save(item.profile).map_err(err)?;
+        connections::save_secrets(&saved.id, item.secrets).map_err(err)?;
+        imported += 1;
+    }
+    Ok(Some(navicat::ImportReport { imported, skipped }))
 }
 
 /// Blank secrets fall back to the stored ones, so editing a saved connection

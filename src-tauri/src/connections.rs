@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -65,6 +65,8 @@ impl Default for SshConfig {
 pub struct ConnectionProfile {
     pub id: String,
     pub name: String,
+    /// Folder in the connection list; empty means ungrouped.
+    pub group: String,
     pub kind: DbKind,
     /// Tag color shown in the connection list and title bar.
     pub color: String,
@@ -104,12 +106,15 @@ impl Secrets {
 
 pub struct Store {
     file: PathBuf,
+    /// Group names in display order, so empty groups survive.
+    groups_file: PathBuf,
 }
 
 impl Store {
     pub fn new(config_dir: &Path) -> Self {
         Self {
             file: config_dir.join("connections.json"),
+            groups_file: config_dir.join("groups.json"),
         }
     }
 
@@ -129,13 +134,82 @@ impl Store {
     }
 
     fn write(&self, all: &[ConnectionProfile]) -> Result<()> {
-        if let Some(dir) = self.file.parent() {
-            std::fs::create_dir_all(dir)?;
+        write_json(&self.file, all)
+    }
+
+    /// Saved groups, then any group a connection names that is not saved.
+    pub fn groups(&self) -> Result<Vec<String>> {
+        let mut groups: Vec<String> = match std::fs::read_to_string(&self.groups_file) {
+            Ok(s) => serde_json::from_str(&s).context("groups.json is corrupt")?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(e.into()),
+        };
+        let mut extra: Vec<String> = self
+            .list()?
+            .into_iter()
+            .map(|p| p.group)
+            .filter(|g| !g.is_empty() && !groups.contains(g))
+            .collect();
+        extra.sort();
+        extra.dedup();
+        groups.extend(extra);
+        Ok(groups)
+    }
+
+    pub fn create_group(&self, name: &str) -> Result<String> {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("the group name is empty");
         }
-        let tmp = self.file.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(all)?)?;
-        std::fs::rename(tmp, &self.file)?;
-        Ok(())
+        let mut groups = self.groups()?;
+        if groups.iter().any(|g| g == name) {
+            bail!("a group named \"{name}\" already exists");
+        }
+        groups.push(name.to_owned());
+        write_json(&self.groups_file, &groups)?;
+        Ok(name.to_owned())
+    }
+
+    /// Renaming onto an existing group merges the two.
+    pub fn rename_group(&self, from: &str, to: &str) -> Result<()> {
+        let to = to.trim();
+        if to.is_empty() {
+            bail!("the group name is empty");
+        }
+        let mut groups = self.groups()?;
+        if groups.iter().any(|g| g == to) {
+            groups.retain(|g| g != from);
+        } else if let Some(g) = groups.iter_mut().find(|g| *g == from) {
+            *g = to.to_owned();
+        }
+        write_json(&self.groups_file, &groups)?;
+        self.regroup(from, to)
+    }
+
+    /// Removes the group; its connections become ungrouped, not deleted.
+    pub fn delete_group(&self, name: &str) -> Result<()> {
+        let mut groups = self.groups()?;
+        groups.retain(|g| g != name);
+        write_json(&self.groups_file, &groups)?;
+        self.regroup(name, "")
+    }
+
+    pub fn move_connection(&self, id: &str, group: &str) -> Result<()> {
+        let mut all = self.list()?;
+        let p = all
+            .iter_mut()
+            .find(|p| p.id == id)
+            .context("connection not found")?;
+        p.group = group.trim().to_owned();
+        self.write(&all)
+    }
+
+    fn regroup(&self, from: &str, to: &str) -> Result<()> {
+        let mut all = self.list()?;
+        for p in all.iter_mut().filter(|p| p.group == from) {
+            p.group = to.to_owned();
+        }
+        self.write(&all)
     }
 
     pub fn save(&self, mut profile: ConnectionProfile) -> Result<ConnectionProfile> {
@@ -156,6 +230,17 @@ impl Store {
         all.retain(|p| p.id != id);
         self.write(&all)
     }
+}
+
+/// Writes through a temp file so a crash never leaves half a file.
+fn write_json<T: Serialize + ?Sized>(file: &Path, value: &T) -> Result<()> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(value)?)?;
+    std::fs::rename(tmp, file)?;
+    Ok(())
 }
 
 const KEYRING_SERVICE: &str = "app.tablory";
@@ -195,5 +280,44 @@ pub fn save_secrets(id: &str, secrets: Secrets) -> Result<()> {
 pub fn delete_secrets(id: &str) {
     if let Ok(e) = entry(id) {
         let _ = e.delete_credential();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn groups_lifecycle() {
+        let dir = std::env::temp_dir().join(format!("tablory-test-{}", uuid::Uuid::new_v4()));
+        let s = Store::new(&dir);
+        let c = s
+            .save(ConnectionProfile {
+                name: "a".into(),
+                group: "Legacy".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        // A group only named by a connection still shows up.
+        assert_eq!(s.groups().unwrap(), ["Legacy"]);
+
+        s.create_group("Prod").unwrap();
+        assert!(s.create_group(" Prod ").is_err());
+        assert!(s.create_group("  ").is_err());
+        assert_eq!(s.groups().unwrap(), ["Legacy", "Prod"]);
+
+        s.move_connection(&c.id, "Prod").unwrap();
+        s.rename_group("Prod", "Production").unwrap();
+        assert_eq!(s.get(&c.id).unwrap().group, "Production");
+        assert_eq!(s.groups().unwrap(), ["Legacy", "Production"]);
+
+        s.create_group("Dev").unwrap();
+        s.rename_group("Dev", "Production").unwrap();
+        assert_eq!(s.groups().unwrap(), ["Legacy", "Production"]);
+
+        s.delete_group("Production").unwrap();
+        assert_eq!(s.get(&c.id).unwrap().group, "");
+        assert_eq!(s.groups().unwrap(), ["Legacy"]);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

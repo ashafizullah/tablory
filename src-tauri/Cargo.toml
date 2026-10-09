@@ -37,6 +37,11 @@ tokio-util = { version = "0.7", features = ["compat"] }
 redis = { version = "1", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "connection-manager"] }
 mongodb = "3"
 json5 = "0.4"
+roxmltree = "0.20"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+blowfish = "0.9"
+sha1 = "0.10"
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 
 [profile.release]

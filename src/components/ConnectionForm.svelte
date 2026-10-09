@@ -6,10 +6,13 @@
 
   let {
     profile,
+    group = "",
     onsaved,
     ondeleted,
   }: {
     profile: ConnectionProfile | null;
+    /** Group of a new connection. */
+    group?: string;
     onsaved: (p: ConnectionProfile) => void;
     ondeleted: () => void;
   } = $props();
@@ -41,6 +44,7 @@
     return {
       id: "",
       name: "",
+      group,
       kind: "postgres",
       color: COLORS[0],
       host: "127.0.0.1",

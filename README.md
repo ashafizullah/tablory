@@ -37,6 +37,8 @@ The app checks for updates on launch and daily; click the version number on the 
 
 - PostgreSQL, MySQL / MariaDB, SQL Server, SQLite, Redis and MongoDB
 - Connections over SSH tunnels (password or private key); passwords live in the OS keychain
+- Organize connections into collapsible groups: right-click the list for a new group, drag connections between groups
+- Import connections from Navicat (File → Export Connections, `.ncx`), passwords included
 - Browse tables with server-side paging, sorting and filters (conditions or a raw `WHERE`)
 - Edit inline: change cells, add and delete rows, preview the SQL, commit in one transaction (⌘S)
 - SQL editor with highlighting and autocomplete; run the statement under the cursor (⌘↵) or everything (⇧⌘↵), cancel long queries

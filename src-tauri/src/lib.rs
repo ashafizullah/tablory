@@ -3,6 +3,7 @@ pub mod connections;
 pub mod db;
 pub mod docdb;
 pub mod kv;
+pub mod navicat;
 pub mod session;
 pub mod ssh;
 mod updater;
@@ -41,7 +42,13 @@ pub fn run() {
             commands::list_connections,
             commands::save_connection,
             commands::delete_connection,
+            commands::list_groups,
+            commands::create_group,
+            commands::rename_group,
+            commands::delete_group,
+            commands::move_connection,
             commands::test_connection,
+            commands::import_navicat,
             commands::connect,
             commands::disconnect,
             commands::switch_database,
