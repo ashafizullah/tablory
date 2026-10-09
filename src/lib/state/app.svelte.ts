@@ -21,6 +21,10 @@ class AppState {
   groups = $state<string[]>([]);
   groupColors = $state<Record<string, string>>({});
   session = $state<SessionInfo | null>(null);
+  /** The connection manager, or the workspace with its connection tree. */
+  view = $state<"connections" | "workspace">("connections");
+  /** The current database is closed in the tree: its objects are unloaded. */
+  dbClosed = $state(false);
   connecting = $state<string | null>(null);
   connectError = $state<string | null>(null);
 
@@ -70,6 +74,8 @@ class AppState {
     try {
       const s = await api.connect(id);
       this.session = s;
+      this.view = "workspace";
+      this.dbClosed = false;
       this.tabs = [];
       this.activeTab = null;
       this.queryCount = 0;
@@ -87,6 +93,7 @@ class AppState {
     }
   }
 
+  /** Closes the session; the workspace stays open on the connection tree. */
   async disconnect() {
     if (!this.session) return;
     if (this.tabs.some((t) => t.dirty)) {
@@ -103,10 +110,31 @@ class AppState {
     await api.disconnect(id).catch(() => {});
   }
 
+  /** Unloads the current database's objects and closes its table tabs. */
+  async closeDatabase() {
+    const isObject = (t: Tab) => t.kind === "table" || t.kind === "collection";
+    if (this.tabs.some((t) => isObject(t) && t.dirty)) {
+      const ok = await this.ask("Discard unsaved changes and close the database?", { ok: "Close", danger: true });
+      if (!ok) return;
+    }
+    this.tabs = this.tabs.filter((t) => !isObject(t));
+    if (!this.tabs.some((t) => t.id === this.activeTab)) this.activeTab = this.tabs.at(-1)?.id ?? null;
+    this.tables = [];
+    this.routines = [];
+    this.sidebarError = null;
+    this.dbClosed = true;
+  }
+
+  async openDatabase() {
+    this.dbClosed = false;
+    await this.loadTables();
+  }
+
   async loadSidebar() {
     const s = this.session;
     if (!s) return;
     this.sidebarError = null;
+    this.dbClosed = false;
     if (s.kind === "redis") {
       this.databases = await api.listDatabases(s.id).catch(() => []);
       return;
@@ -154,6 +182,7 @@ class AppState {
     const s = this.session;
     if (!s) return;
     this.schema = schema;
+    this.dbClosed = false;
     // On MySQL a schema is a database: make it the editor's default too.
     if (s.kind === "mysql" && schema !== s.database) {
       try {
@@ -174,6 +203,7 @@ class AppState {
     }
     try {
       s.database = await api.switchDatabase(s.id, db);
+      this.dbClosed = false;
       this.tabs = this.tabs.filter((t) => t.kind === "query" || t.kind === "mongo-command");
       this.activeTab = this.tabs.at(-1)?.id ?? null;
       this.schema = "";

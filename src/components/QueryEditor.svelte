@@ -6,7 +6,7 @@
   import { sql as sqlLang } from "@codemirror/lang-sql";
   import { app, type Tab } from "../lib/state/app.svelte";
   import { api, errorText } from "../lib/api";
-  import { uid } from "../lib/cells";
+  import { kindLabel, uid } from "../lib/cells";
   import { dialectFor, highlight, keymap, theme } from "../lib/codemirror";
   import { splitStatements, statementAt } from "../lib/sqlsplit";
   import type { ExecuteResult } from "../lib/types";
@@ -28,6 +28,29 @@
 
   const session = $derived(app.session!);
   const mysql = $derived(session.kind === "mysql");
+
+  // Where unqualified names resolve, read from the editor's own connection
+  // so a SET search_path / USE in this session shows up after a run.
+  const SCHEMA_SQL: Partial<Record<string, string>> = {
+    postgres: "SELECT current_schema()",
+    mssql: "SELECT SCHEMA_NAME()",
+  };
+  let defaultSchema = $state("");
+  async function loadDefaultSchema() {
+    const q = SCHEMA_SQL[session.kind];
+    if (!q) return;
+    try {
+      const r = await api.execute(session.id, q, 1, uid());
+      const v = r.statements[0]?.result?.rows[0]?.[0];
+      defaultSchema = typeof v === "string" ? v : "";
+    } catch {
+      defaultSchema = "";
+    }
+  }
+  $effect(() => {
+    void session.database;
+    loadDefaultSchema();
+  });
 
   function languageExt() {
     const schema: Record<string, string[]> = {};
@@ -68,6 +91,7 @@
     } finally {
       running = null;
     }
+    loadDefaultSchema();
   }
 
   async function cancel() {
@@ -155,6 +179,21 @@
     </select>
   </div>
 
+  <div class="target" style:border-left-color={session.color || "var(--muted)"} title="Queries in this tab run here">
+    <span class="muted">Runs on</span>
+    <span class="swatch" style:background={session.color || "var(--muted)"}></span>
+    <strong>{session.name}</strong>
+    <span class="muted">{kindLabel[session.kind]}</span>
+    <span class="sep" aria-hidden="true">›</span>
+    <span class="icon" aria-hidden="true">⛁</span>
+    <strong>{session.database || "(default database)"}</strong>
+    {#if defaultSchema}
+      <span class="sep" aria-hidden="true">›</span>
+      <span>{defaultSchema}</span>
+      <span class="muted">default schema</span>
+    {/if}
+  </div>
+
   <div class="editor" bind:this={host} style:height="{editorHeight}px"></div>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions (pointer-only splitter) -->
   <div class="divider" role="separator" aria-orientation="horizontal" aria-label="Resize editor" onmousedown={startResize}></div>
@@ -230,6 +269,29 @@
   .on-accent {
     color: inherit;
     opacity: 0.75;
+  }
+  .target {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border);
+    border-left: 3px solid;
+    background: var(--bg);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .target .swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex: none;
+  }
+  .target .sep,
+  .target .icon {
+    color: var(--muted);
   }
   .editor {
     flex: none;

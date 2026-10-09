@@ -13,7 +13,7 @@
   });
 </script>
 
-{#if app.session}
+{#if app.view === "workspace"}
   <Workspace />
 {:else}
   <ConnectionsScreen {loadError} />

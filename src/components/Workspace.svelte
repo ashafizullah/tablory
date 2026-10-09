@@ -9,8 +9,8 @@
   import MongoCommand from "./MongoCommand.svelte";
   import RedisWorkspace from "./RedisWorkspace.svelte";
 
-  const session = $derived(app.session!);
-  const queryLabel = $derived(session.kind === "mongodb" ? "Command" : "SQL");
+  const session = $derived(app.session);
+  const queryLabel = $derived(session?.kind === "mongodb" ? "Command" : "SQL");
 
   const RAIL_KEY = "tablory.connectionRail";
   let showRail = $state(readRail());
@@ -31,7 +31,7 @@
   function onkeydown(e: KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod || app.confirm) return;
-    if (e.key === "t" && session.kind !== "redis") {
+    if (e.key === "t" && session && session.kind !== "redis") {
       e.preventDefault();
       app.newQuery();
     } else if (e.key === "w") {
@@ -59,24 +59,37 @@
       aria-label="{showRail ? 'Hide' : 'Show'} connections"
       aria-pressed={showRail}>☰</button
     >
-    <span class="conn" data-tauri-drag-region>
-      <span class="swatch" style:background={session.color || "var(--muted)"}></span>
-      <strong>{session.name}</strong>
-      <span class="muted">{kindLabel[session.kind]}</span>
-    </span>
-    {#if session.database}
-      <span class="muted db" data-tauri-drag-region>/ {session.kind === "redis" ? `db ${session.database}` : session.database}</span>
+    {#if session}
+      <span class="conn" data-tauri-drag-region>
+        <span class="swatch" style:background={session.color || "var(--muted)"}></span>
+        <strong>{session.name}</strong>
+        <span class="muted">{kindLabel[session.kind]}</span>
+      </span>
+      {#if session.database}
+        <span class="muted db" data-tauri-drag-region>/ {session.kind === "redis" ? `db ${session.database}` : session.database}</span>
+      {/if}
+    {:else}
+      <span class="muted" data-tauri-drag-region>Not connected</span>
     {/if}
     <span class="spacer" data-tauri-drag-region></span>
-    {#if session.kind !== "redis"}
+    {#if session && session.kind !== "redis"}
       <button class="btn" onclick={() => app.newQuery()} title="New {queryLabel.toLowerCase()} tab (⌘T)">{queryLabel}</button>
     {/if}
-    <button class="btn" onclick={() => app.disconnect()} title="Back to connections (⌘K)">Disconnect</button>
+    {#if session}
+      <button class="btn" onclick={() => app.disconnect()} title="Disconnect (⌘K)">Disconnect</button>
+    {/if}
+    <button class="btn" onclick={() => (app.view = "connections")} title="Add, edit or import connections">Manage…</button>
   </header>
 
   <div class="frame" class:with-rail={showRail}>
   {#if showRail}<ConnectionRail />{/if}
   <div class="content">
+  {#if !session}
+    <div class="empty">
+      <p>Not connected. Pick a connection on the left.</p>
+      {#if !showRail}<button class="btn" onclick={toggleRail}>Show connections <span class="kbd">⌘B</span></button>{/if}
+    </div>
+  {:else}
   {#key session.id}
   {#if session.kind === "redis"}
     {#key session.database}<RedisWorkspace />{/key}
@@ -132,6 +145,7 @@
   </div>
   {/if}
   {/key}
+  {/if}
   </div>
   </div>
 </div>

@@ -97,6 +97,11 @@
   }
 
   function openDb(db: string) {
+    if (db === currentDb && app.dbClosed) {
+      dbOpen = true;
+      app.openDatabase();
+      return;
+    }
     if (db === currentDb) {
       dbOpen = !dbOpen;
       return;
@@ -106,7 +111,56 @@
     else app.switchDatabase(db);
   }
 
+  // ---- Right-click menu ----
+
+  type MenuItem = { label: string; action: () => void; danger?: boolean } | "sep";
+  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+
+  function openMenu(e: MouseEvent, items: MenuItem[]) {
+    e.preventDefault();
+    const h = items.reduce((n, i) => n + (i === "sep" ? 9 : 26), 10);
+    menu = {
+      x: Math.min(e.clientX, window.innerWidth - 190),
+      y: Math.max(4, Math.min(e.clientY, window.innerHeight - h - 4)),
+      items,
+    };
+  }
+
+  function connectionMenu(e: MouseEvent, c: ConnectionProfile) {
+    const current = c.id === session?.connection_id;
+    openMenu(
+      e,
+      current
+        ? [
+            { label: "Refresh", action: () => app.loadSidebar() },
+            "sep",
+            { label: "Disconnect", danger: true, action: () => app.disconnect() },
+          ]
+        : [{ label: "Connect", action: () => openConnection(c) }],
+    );
+  }
+
+  function dbMenu(e: MouseEvent, db: string) {
+    const live = db === currentDb && !app.dbClosed;
+    if (kind === "redis") {
+      if (!live) openMenu(e, [{ label: "Open", action: () => openDb(db) }]);
+      else e.preventDefault();
+      return;
+    }
+    openMenu(
+      e,
+      live
+        ? [
+            { label: "Refresh", action: () => app.loadSidebar() },
+            "sep",
+            { label: "Close database", danger: true, action: () => app.closeDatabase() },
+          ]
+        : [{ label: "Open database", action: () => openDb(db) }],
+    );
+  }
+
   function onkeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && menu) menu = null;
     if ((e.metaKey || e.ctrlKey) && e.key === "f" && !e.shiftKey && !app.confirm) {
       e.preventDefault();
       searchInput?.focus();
@@ -121,7 +175,11 @@
   const pad = (depth: number) => `${6 + depth * 14}px`;
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window
+  {onkeydown}
+  onmousedown={(e) => menu && !(e.target as Element).closest(".menu") && (menu = null)}
+  onblur={() => (menu = null)}
+/>
 
 {#snippet objects(depth: number)}
   {#if app.sidebarError}
@@ -193,6 +251,7 @@
     class:current
     style:padding-left={pad(depth)}
     onclick={() => openConnection(c)}
+    oncontextmenu={(e) => connectionMenu(e, c)}
     aria-expanded={current ? expanded : undefined}
     title="{c.name || 'Untitled'} · {kindLabel[c.kind]}"
   >
@@ -211,19 +270,21 @@
     {:else}
       {#each dbs as db (db)}
         {@const on = db === currentDb}
+        {@const live = on && !app.dbClosed}
         <button
           class="row db"
-          class:on={on && kind === "redis"}
+          class:on={live && kind === "redis"}
           style:padding-left={pad(depth + 1)}
           onclick={() => openDb(db)}
-          aria-expanded={on && kind !== "redis" ? dbOpen : undefined}
+          oncontextmenu={(e) => dbMenu(e, db)}
+          aria-expanded={live && kind !== "redis" ? dbOpen : undefined}
           title={db}
         >
-          {#if kind !== "redis"}<span class="chevron" class:closed={!on || !dbOpen}>▾</span>{/if}
-          <span class="icon" class:active={on} aria-hidden="true">⛁</span>
-          <span class="name" class:strong={on}>{kind === "redis" ? `db ${db}` : db}</span>
+          {#if kind !== "redis"}<span class="chevron" class:closed={!live || !dbOpen}>▾</span>{/if}
+          <span class="icon" class:active={live} aria-hidden="true">⛁</span>
+          <span class="name" class:strong={live}>{kind === "redis" ? `db ${db}` : db}</span>
         </button>
-        {#if on && dbOpen && kind !== "redis"}
+        {#if live && dbOpen && kind !== "redis"}
           {@render objects(depth + 2)}
         {/if}
       {:else}
@@ -273,6 +334,25 @@
     </p>
   {/if}
 </nav>
+
+{#if menu}
+  <div class="menu" style:left="{menu.x}px" style:top="{menu.y}px" role="menu">
+    {#each menu.items as m}
+      {#if m === "sep"}
+        <hr />
+      {:else}
+        <button
+          role="menuitem"
+          class:danger={m.danger}
+          onclick={() => {
+            menu = null;
+            m.action();
+          }}>{m.label}</button
+        >
+      {/if}
+    {/each}
+  </div>
+{/if}
 
 <style>
   .rail {
@@ -413,6 +493,37 @@
     font-size: 12px;
     border-top: 1px solid var(--border);
     word-break: break-word;
+  }
+  .menu {
+    position: fixed;
+    z-index: 50;
+    min-width: 180px;
+    padding: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgb(0 0 0 / 0.2);
+  }
+  .menu button {
+    display: block;
+    width: 100%;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    text-align: left;
+  }
+  .menu button:hover {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .menu .danger {
+    color: var(--danger);
+  }
+  .menu hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 4px 0;
   }
   .link {
     border: 0;

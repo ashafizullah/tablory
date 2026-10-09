@@ -286,6 +286,12 @@
   <aside class="list">
     <div class="titlebar" class:mac={isMac} data-tauri-drag-region>
       <span class="app-name" data-tauri-drag-region>Tablory</span>
+      {#if app.session}
+        <span class="spacer" data-tauri-drag-region></span>
+        <button class="link muted" onclick={() => (app.view = "workspace")} title="Back to {app.session.name}">
+          Workspace →
+        </button>
+      {/if}
     </div>
     <div
       class="items"
