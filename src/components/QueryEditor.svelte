@@ -141,6 +141,12 @@
 
   onDestroy(() => view?.destroy());
 
+  function onkeydown(e: KeyboardEvent) {
+    if (!active || app.confirm || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "s") return;
+    e.preventDefault();
+    app.saveQuery(tab, e.shiftKey);
+  }
+
   function startResize(e: MouseEvent) {
     e.preventDefault();
     const startY = e.clientY;
@@ -158,6 +164,8 @@
   const statementCount = $derived(splitStatements(tab.sql, mysql).length);
 </script>
 
+<svelte:window {onkeydown} />
+
 <div class="qe">
   <div class="toolbar">
     <button class="btn primary" onclick={() => run(false)} disabled={!!running} title="Run statement or selection (⌘↵)">
@@ -170,6 +178,10 @@
       <button class="btn danger" onclick={cancel} disabled={session.kind === "sqlite"}>Cancel</button>
     {/if}
     <span class="grow"></span>
+    <button class="btn" onclick={() => app.saveQuery(tab)} title={tab.path ? `Save to ${tab.path} (⌘S)` : "Save as a .sql file (⌘S)"}>
+      Save
+    </button>
+    <button class="btn" onclick={() => app.saveQuery(tab, true)} title="Save to a new file (⇧⌘S)">Save as…</button>
     <label class="muted small" for="max-{tab.id}">Row limit</label>
     <select id="max-{tab.id}" class="field" bind:value={maxRows}>
       <option value={200}>200</option>

@@ -4,16 +4,39 @@ import type { ConnectionProfile, RoutineInfo, SessionInfo, TableInfo, TableRef }
 
 export type Tab =
   | { id: string; kind: "table"; table: TableRef; title: string; dirty: boolean }
-  | { id: string; kind: "query"; title: string; sql: string; dirty: boolean }
+  | {
+      id: string;
+      kind: "query";
+      title: string;
+      sql: string;
+      dirty: boolean;
+      /** The .sql file it was opened from or saved to. */
+      path: string | null;
+      /** The text as last saved or opened, to tell if it changed. */
+      saved: string;
+    }
   | { id: string; kind: "collection"; db: string; name: string; title: string; dirty: boolean }
   | { id: string; kind: "mongo-command"; title: string; text: string; dirty: boolean };
+
+type QueryTab = Extract<Tab, { kind: "query" }>;
+
+/** The query text changed since it was last saved, opened or created. */
+export const queryModified = (t: QueryTab) => t.sql !== t.saved;
+
+const fileTitle = (path: string) => path.split(/[\\/]/).pop()!.replace(/\.sql$/i, "");
+
+/** Open query tabs per connection, restored on the next connect. */
+const QUERIES_KEY = (connectionId: string) => `tablory.queryTabs.${connectionId}`;
+type StoredQuery = Pick<QueryTab, "title" | "sql" | "path" | "saved">;
 
 interface Confirm {
   message: string;
   detail?: string;
   ok: string;
+  /** A third choice, e.g. "Don't save". */
+  alt?: string;
   danger: boolean;
-  resolve: (v: boolean) => void;
+  resolve: (v: boolean | "alt") => void;
 }
 
 class AppState {
@@ -52,11 +75,24 @@ class AppState {
 
   ask(message: string, opts: { detail?: string; ok?: string; danger?: boolean } = {}): Promise<boolean> {
     return new Promise((resolve) => {
-      this.confirm = { message, detail: opts.detail, ok: opts.ok ?? "OK", danger: opts.danger ?? false, resolve };
+      this.confirm = {
+        message,
+        detail: opts.detail,
+        ok: opts.ok ?? "OK",
+        danger: opts.danger ?? false,
+        resolve: (v) => resolve(v === true),
+      };
     });
   }
 
-  answer(v: boolean) {
+  /** Like `ask`, with a third button that resolves to "alt". */
+  choose(message: string, opts: { detail?: string; ok: string; alt: string }): Promise<boolean | "alt"> {
+    return new Promise((resolve) => {
+      this.confirm = { message, detail: opts.detail, ok: opts.ok, alt: opts.alt, danger: false, resolve };
+    });
+  }
+
+  answer(v: boolean | "alt") {
     this.confirm?.resolve(v);
     this.confirm = null;
   }
@@ -84,6 +120,7 @@ class AppState {
       this.schemas = [];
       this.databases = [];
       this.schema = "";
+      this.restoreQueries();
       if (old) api.disconnect(old.id).catch(() => {});
       await this.loadSidebar();
     } catch (e) {
@@ -263,9 +300,99 @@ class AppState {
       this.activeTab = tab.id;
       return;
     }
-    const tab: Tab = { id: uid(), kind: "query", title: title ?? `Query ${this.queryCount}`, sql, dirty: false };
+    const tab: Tab = {
+      id: uid(),
+      kind: "query",
+      title: title ?? `Query ${this.queryCount}`,
+      sql,
+      dirty: false,
+      path: null,
+      saved: sql,
+    };
     this.tabs.push(tab);
     this.activeTab = tab.id;
+  }
+
+  /** Writes a query tab to its file, or asks where first (`as`, or never saved). */
+  async saveQuery(tab: QueryTab, as = false): Promise<boolean> {
+    const sql = tab.sql;
+    try {
+      const path = await api.saveSqlFile(as ? null : tab.path, tab.title, sql);
+      if (!path) return false;
+      tab.path = path;
+      tab.saved = sql;
+      tab.title = fileTitle(path);
+      return true;
+    } catch (e) {
+      await this.ask("Could not save the query.", { detail: errorText(e) });
+      return false;
+    }
+  }
+
+  /** Opens a .sql file in a query tab, or switches to it if already open. */
+  async openQueryFile() {
+    if (!this.session || this.session.kind === "mongodb" || this.session.kind === "redis") return;
+    let file;
+    try {
+      file = await api.openSqlFile();
+    } catch (e) {
+      await this.ask("Could not open the file.", { detail: errorText(e) });
+      return;
+    }
+    if (!file) return;
+    const existing = this.tabs.find((t) => t.kind === "query" && t.path === file.path);
+    if (existing) {
+      this.activeTab = existing.id;
+      return;
+    }
+    const tab: Tab = {
+      id: uid(),
+      kind: "query",
+      title: fileTitle(file.path),
+      sql: file.contents,
+      dirty: false,
+      path: file.path,
+      saved: file.contents,
+    };
+    this.tabs.push(tab);
+    this.activeTab = tab.id;
+  }
+
+  /** Remembers the open query tabs, text included, for this connection. */
+  persistQueries() {
+    const s = this.session;
+    if (!s) return;
+    const queries: StoredQuery[] = this.tabs
+      .filter((t): t is QueryTab => t.kind === "query")
+      .map(({ title, sql, path, saved }) => ({ title, sql, path, saved }));
+    try {
+      if (queries.length) localStorage.setItem(QUERIES_KEY(s.connection_id), JSON.stringify(queries));
+      else localStorage.removeItem(QUERIES_KEY(s.connection_id));
+    } catch {}
+  }
+
+  private restoreQueries() {
+    const s = this.session;
+    if (!s || s.kind === "redis" || s.kind === "mongodb") return;
+    let queries: StoredQuery[] = [];
+    try {
+      queries = JSON.parse(localStorage.getItem(QUERIES_KEY(s.connection_id)) ?? "[]");
+    } catch {}
+    if (!Array.isArray(queries)) return;
+    for (const q of queries) {
+      this.tabs.push({
+        id: uid(),
+        kind: "query",
+        title: q.title,
+        sql: q.sql ?? "",
+        dirty: false,
+        path: q.path ?? null,
+        saved: q.saved ?? "",
+      });
+      const n = /^Query (\d+)$/.exec(q.title);
+      if (n) this.queryCount = Math.max(this.queryCount, Number(n[1]));
+    }
+    this.activeTab = this.tabs.at(-1)?.id ?? null;
   }
 
   async closeTab(id: string) {
@@ -276,8 +403,20 @@ class AppState {
       const ok = await this.ask(`Discard unsaved changes to ${tab.title}?`, { ok: "Discard", danger: true });
       if (!ok) return;
     }
-    this.tabs.splice(i, 1);
-    if (this.activeTab === id) this.activeTab = (this.tabs[i] ?? this.tabs[i - 1])?.id ?? null;
+    if (tab.kind === "query" && queryModified(tab)) {
+      const choice = await this.choose(`Save changes to ${tab.title}?`, {
+        detail: "Closing the tab loses changes that are not saved to a file.",
+        ok: "Save",
+        alt: "Don't save",
+      });
+      if (choice === false) return;
+      if (choice === true && !(await this.saveQuery(tab))) return;
+    }
+    // The tab list may have changed while a dialog was open.
+    const at = this.tabs.findIndex((t) => t.id === id);
+    if (at < 0) return;
+    this.tabs.splice(at, 1);
+    if (this.activeTab === id) this.activeTab = (this.tabs[at] ?? this.tabs[at - 1])?.id ?? null;
   }
 }
 

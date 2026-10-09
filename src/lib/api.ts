@@ -57,6 +57,9 @@ export const api = {
     invoke<number>("apply_changes", { session, table, changes }),
   importNavicat: () => invoke<{ imported: number; skipped: string[] } | null>("import_navicat"),
   pickFile: (create: boolean) => invoke<string | null>("pick_file", { create }),
+  saveSqlFile: (path: string | null, name: string, contents: string) =>
+    invoke<string | null>("save_sql_file", { path, name, contents }),
+  openSqlFile: () => invoke<{ path: string; contents: string } | null>("open_sql_file"),
 
   redisScan: (session: string, cursor: string, pattern: string, count: number) =>
     invoke<{ cursor: string; keys: RedisKey[] }>("redis_scan", { session, cursor, pattern, count }),

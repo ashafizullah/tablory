@@ -348,6 +348,62 @@ pub async fn pick_file(app: AppHandle, create: bool) -> Option<String> {
     Some(path.display().to_string())
 }
 
+#[derive(serde::Serialize)]
+pub struct SqlFile {
+    path: String,
+    contents: String,
+}
+
+/// Writes a query to `path`, or to a file picked in a save dialog when there
+/// is none yet (Save As). `None` when the dialog is cancelled.
+#[tauri::command]
+pub async fn save_sql_file(
+    app: AppHandle,
+    path: Option<String>,
+    name: String,
+    contents: String,
+) -> CmdResult<Option<String>> {
+    let path = match path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            app.dialog()
+                .file()
+                .add_filter("SQL", &["sql"])
+                .set_file_name(format!("{name}.sql"))
+                .save_file(move |p| {
+                    let _ = tx.send(p.and_then(|p| p.into_path().ok()));
+                });
+            match rx.await.ok().flatten() {
+                Some(p) => p,
+                None => return Ok(None),
+            }
+        }
+    };
+    std::fs::write(&path, contents).map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+pub async fn open_sql_file(app: AppHandle) -> CmdResult<Option<SqlFile>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("SQL", &["sql"])
+        .add_filter("All files", &["*"])
+        .pick_file(move |p| {
+            let _ = tx.send(p.and_then(|p| p.into_path().ok()));
+        });
+    let Some(path) = rx.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let contents = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(Some(SqlFile {
+        path: path.display().to_string(),
+        contents,
+    }))
+}
+
 #[tauri::command]
 pub async fn redis_scan(
     state: State<'_, AppState>,

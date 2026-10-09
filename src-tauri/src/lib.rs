@@ -1,4 +1,5 @@
 mod commands;
+mod menu;
 pub mod connections;
 pub mod db;
 pub mod docdb;
@@ -27,6 +28,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            app.set_menu(menu::build(app.handle())?)?;
+            app.on_menu_event(|app, event| menu::handle(app, event.id().as_ref()));
             let dir = app.path().app_config_dir()?;
             app.manage(AppState {
                 store: connections::Store::new(&dir),
@@ -67,6 +70,8 @@ pub fn run() {
             commands::preview_changes,
             commands::apply_changes,
             commands::pick_file,
+            commands::save_sql_file,
+            commands::open_sql_file,
             commands::check_updates,
             commands::app_version,
             commands::redis_scan,

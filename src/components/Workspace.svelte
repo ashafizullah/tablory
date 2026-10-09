@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { app } from "../lib/state/app.svelte";
+  import { onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
+  import { app, queryModified } from "../lib/state/app.svelte";
   import { isMac } from "../lib/api";
   import { kindLabel } from "../lib/cells";
   import ConnectionRail from "./ConnectionRail.svelte";
@@ -11,6 +13,10 @@
 
   const session = $derived(app.session);
   const queryLabel = $derived(session?.kind === "mongodb" ? "Command" : "SQL");
+  const sqlFiles = $derived(!!session && session.kind !== "redis" && session.kind !== "mongodb");
+
+  // Query tabs survive a disconnect or restart: keep them saved as they change.
+  $effect(() => app.persistQueries());
 
   const RAIL_KEY = "tablory.connectionRail";
   let showRail = $state(readRail());
@@ -28,22 +34,50 @@
     } catch {}
   }
 
+  /** Runs a File/View menu command, also reached through its shortcut. */
+  function command(id: string) {
+    if (app.confirm) return;
+    const tab = app.tabs.find((t) => t.id === app.activeTab);
+    switch (id) {
+      case "new-query":
+        if (session && session.kind !== "redis") app.newQuery();
+        break;
+      case "open-file":
+        if (sqlFiles) app.openQueryFile();
+        break;
+      case "save":
+      case "save-as":
+        if (tab?.kind === "query") app.saveQuery(tab, id === "save-as");
+        break;
+      case "close-tab":
+        if (app.activeTab) app.closeTab(app.activeTab);
+        break;
+      case "toggle-rail":
+        toggleRail();
+        break;
+      case "disconnect":
+        app.disconnect();
+        break;
+      case "manage":
+        app.view = "connections";
+        break;
+    }
+  }
+
+  onMount(() => {
+    const off = listen<string>("menu", (e) => command(e.payload));
+    return () => off.then((f) => f());
+  });
+
+  const KEYS: Record<string, string> = { t: "new-query", o: "open-file", w: "close-tab", b: "toggle-rail", k: "disconnect" };
+
   function onkeydown(e: KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
-    if (!mod || app.confirm) return;
-    if (e.key === "t" && session && session.kind !== "redis") {
-      e.preventDefault();
-      app.newQuery();
-    } else if (e.key === "w") {
-      e.preventDefault();
-      if (app.activeTab) app.closeTab(app.activeTab);
-    } else if (e.key === "b") {
-      e.preventDefault();
-      toggleRail();
-    } else if (e.key === "k") {
-      e.preventDefault();
-      app.disconnect();
-    }
+    if (!mod || app.confirm || e.shiftKey || e.altKey) return;
+    const id = KEYS[e.key];
+    if (!id) return;
+    e.preventDefault();
+    command(id);
   }
 </script>
 
@@ -74,6 +108,9 @@
     <span class="spacer" data-tauri-drag-region></span>
     {#if session && session.kind !== "redis"}
       <button class="btn" onclick={() => app.newQuery()} title="New {queryLabel.toLowerCase()} tab (⌘T)">{queryLabel}</button>
+    {/if}
+    {#if sqlFiles}
+      <button class="btn" onclick={() => app.openQueryFile()} title="Open a .sql file (⌘O)">Open…</button>
     {/if}
     {#if session}
       <button class="btn" onclick={() => app.disconnect()} title="Disconnect (⌘K)">Disconnect</button>
@@ -106,9 +143,10 @@
                 aria-selected={t.id === app.activeTab}
                 onclick={() => (app.activeTab = t.id)}
                 onauxclick={(e) => e.button === 1 && app.closeTab(t.id)}
+                title={t.kind === "query" && t.path ? t.path : undefined}
               >
                 {#if t.dirty}<span class="dirty" title="Unsaved changes">●</span>{/if}
-                <span class="kind-tag">{t.kind === "query" ? "SQL" : t.kind === "mongo-command" ? "CMD" : ""}</span>{t.title}
+                <span class="kind-tag">{t.kind === "query" ? "SQL" : t.kind === "mongo-command" ? "CMD" : ""}</span>{t.title}{#if t.kind === "query" && queryModified(t)}<span class="unsaved" title="Not saved">*</span>{/if}
               </button>
               <button class="close" aria-label="Close {t.title}" onclick={() => app.closeTab(t.id)}>×</button>
             </div>
@@ -263,6 +301,11 @@
     color: #d97706;
     font-size: 9px;
     margin-right: 4px;
+  }
+  .unsaved {
+    margin-left: 1px;
+    color: #d97706;
+    font-weight: 600;
   }
   .close {
     border: 0;

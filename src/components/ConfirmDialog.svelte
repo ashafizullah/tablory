@@ -16,6 +16,9 @@
     <p id="confirm-msg" class="msg">{app.confirm?.message}</p>
     {#if app.confirm?.detail}<p class="muted">{app.confirm.detail}</p>{/if}
     <div class="actions">
+      {#if app.confirm?.alt}
+        <button class="btn alt" onclick={() => app.answer("alt")}>{app.confirm.alt}</button>
+      {/if}
       <button class="btn" onclick={() => app.answer(false)}>Cancel</button>
       <button
         class="btn primary"
@@ -53,6 +56,9 @@
     justify-content: flex-end;
     gap: 8px;
     margin-top: 16px;
+  }
+  .alt {
+    margin-right: auto;
   }
   .danger-fill {
     background: var(--danger);
