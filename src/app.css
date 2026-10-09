@@ -18,9 +18,14 @@
   --deleted: #fde0e0;
   --null: #a1a1a6;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --syn-keyword: #a626a4;
+  --syn-keyword: #0b57d0;
+  --syn-function: #a626a4;
+  --syn-type: #0e7c86;
   --syn-string: #2f8a3b;
   --syn-number: #b35c00;
+  --syn-ident: #8a5a00;
+  --syn-variable: #c2185b;
+  --syn-operator: #5c6370;
   --syn-comment: #8e8e93;
   color-scheme: light dark;
 }
@@ -42,9 +47,14 @@
     --inserted: #183d22;
     --deleted: #4d1f22;
     --null: #6e6e73;
-    --syn-keyword: #d68cf0;
+    --syn-keyword: #6cb6ff;
+    --syn-function: #d68cf0;
+    --syn-type: #5ccfe6;
     --syn-string: #8fd18c;
     --syn-number: #f0b36a;
+    --syn-ident: #e5c07b;
+    --syn-variable: #f78fb3;
+    --syn-operator: #abb2bf;
     --syn-comment: #7c7c82;
   }
 }

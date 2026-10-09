@@ -31,10 +31,16 @@ export const theme = EditorView.theme({
 
 export const highlight = syntaxHighlighting(
   HighlightStyle.define([
-    { tag: [t.keyword, t.operatorKeyword, t.modifier], color: "var(--syn-keyword)" },
-    { tag: [t.string, t.special(t.string)], color: "var(--syn-string)" },
+    { tag: [t.keyword, t.operatorKeyword, t.modifier], color: "var(--syn-keyword)", fontWeight: "600" },
+    // Built-in functions such as COUNT or GETDATE.
+    { tag: t.standard(t.name), color: "var(--syn-function)" },
+    { tag: t.typeName, color: "var(--syn-type)" },
+    { tag: t.string, color: "var(--syn-string)" },
+    // lang-sql tags quoted identifiers ("name", `name`, [name]) as special strings.
+    { tag: t.special(t.string), color: "var(--syn-ident)" },
+    { tag: t.special(t.name), color: "var(--syn-variable)" },
     { tag: [t.number, t.bool, t.null], color: "var(--syn-number)" },
+    { tag: t.operator, color: "var(--syn-operator)" },
     { tag: [t.comment, t.lineComment, t.blockComment], color: "var(--syn-comment)", fontStyle: "italic" },
-    { tag: [t.typeName, t.standard(t.name)], color: "var(--accent)" },
   ]),
 );
