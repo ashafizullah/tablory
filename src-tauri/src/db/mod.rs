@@ -58,6 +58,14 @@ pub struct ColumnInfo {
     pub primary_key: bool,
 }
 
+/// One column of a table or view, for editor autocomplete.
+#[derive(Serialize, Debug)]
+pub struct ColumnName {
+    pub table: String,
+    pub column: String,
+    pub data_type: String,
+}
+
 #[derive(Serialize, Debug)]
 pub struct IndexInfo {
     pub name: String,
@@ -239,6 +247,51 @@ pub trait Driver: Send + Sync {
                 name: text(r.first()),
                 kind: text(r.get(1)),
                 id: text(r.get(2)),
+            })
+            .collect())
+    }
+
+    /// Every column of every table and view in the schema, in one query.
+    async fn list_columns(&self, schema: &str) -> Result<Vec<ColumnName>> {
+        let d = self.dialect();
+        let s = sql::quote_literal(d, schema);
+        let q = match d {
+            Dialect::Postgres => format!(
+                "SELECT table_name::text, column_name::text, data_type::text
+                 FROM information_schema.columns WHERE table_schema = {s}
+                 ORDER BY table_name, ordinal_position"
+            ),
+            Dialect::Mysql => format!(
+                "SELECT CAST(TABLE_NAME AS CHAR), CAST(COLUMN_NAME AS CHAR), CAST(DATA_TYPE AS CHAR)
+                 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = {s}
+                 ORDER BY TABLE_NAME, ORDINAL_POSITION"
+            ),
+            Dialect::Mssql => format!(
+                "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+                 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = {s}
+                 ORDER BY TABLE_NAME, ORDINAL_POSITION"
+            ),
+            Dialect::Sqlite => format!(
+                "SELECT m.name, p.name, p.type
+                 FROM {}.sqlite_master m JOIN pragma_table_info(m.name, {s}) p
+                 WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
+                 ORDER BY m.name, p.cid",
+                sql::quote_ident(d, schema)
+            ),
+        };
+        let rs = self.query(&q, 200_000).await?;
+        let text = |v: Option<&Value>| match v {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Null) | None => String::new(),
+            Some(v) => v.to_string(),
+        };
+        Ok(rs
+            .rows
+            .iter()
+            .map(|r| ColumnName {
+                table: text(r.first()),
+                column: text(r.get(1)),
+                data_type: text(r.get(2)),
             })
             .collect())
     }

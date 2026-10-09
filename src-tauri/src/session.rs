@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::connections::{ConnectionProfile, DbKind, Secrets};
+use crate::connections::{ConnectionProfile, DbKind, Safety, Secrets};
 use crate::db::{self, Driver};
 use crate::docdb::MongoDriver;
 use crate::kv::RedisDriver;
@@ -98,6 +98,7 @@ pub struct SessionInfo {
     pub kind: DbKind,
     pub color: String,
     pub database: String,
+    pub safety: Safety,
 }
 
 impl Session {
@@ -190,6 +191,7 @@ impl Sessions {
             kind: profile.kind,
             color: profile.color.clone(),
             database,
+            safety: profile.safety,
         };
         let session = Session {
             profile,

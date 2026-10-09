@@ -10,6 +10,9 @@ export interface SshConfig {
   key_path: string;
 }
 
+/** Guard rails for SQL connections. */
+export type Safety = "normal" | "production" | "readonly";
+
 export interface ConnectionProfile {
   id: string;
   name: string;
@@ -28,6 +31,7 @@ export interface ConnectionProfile {
   auth_source: string;
   /** SQL Server: log in as the current Windows user. */
   windows_auth: boolean;
+  safety: Safety;
 }
 
 /** `null` keeps the stored secret; "" clears it. */
@@ -44,6 +48,7 @@ export interface SessionInfo {
   kind: DbKind;
   color: string;
   database: string;
+  safety: Safety;
 }
 
 export interface TableRef {

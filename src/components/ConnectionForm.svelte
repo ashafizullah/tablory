@@ -56,6 +56,7 @@
       uri: "",
       auth_source: "",
       windows_auth: false,
+      safety: "normal",
     };
   }
 
@@ -281,6 +282,24 @@
         </select>
       {/if}
     {/if}
+
+    {#if p.kind !== "redis" && p.kind !== "mongodb"}
+      <label for="f-safety">Safety</label>
+      <div class="row">
+        <select id="f-safety" class="field narrow" bind:value={p.safety}>
+          <option value="normal">Normal</option>
+          <option value="production">Production</option>
+          <option value="readonly">Read-only</option>
+        </select>
+        <span class="muted small">
+          {p.safety === "production"
+            ? "Asks before every statement or edit that changes data."
+            : p.safety === "readonly"
+              ? "Blocks statements and edits that change data."
+              : "Asks only before DELETE/UPDATE without WHERE, TRUNCATE and DROP."}
+        </span>
+      </div>
+    {/if}
   </div>
 
   {#if usesUri}
@@ -412,6 +431,9 @@
   }
   .narrow {
     width: 140px;
+  }
+  .small {
+    font-size: 12px;
   }
   .colors {
     display: flex;

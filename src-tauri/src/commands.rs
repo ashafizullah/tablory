@@ -7,11 +7,12 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::connections::{self, ConnectionProfile, Secrets};
 use crate::db::{
-    ExecuteResult, ResultSet, RoutineInfo, RowChange, RowsRequest, TableInfo, TableRef,
+    ColumnName, ExecuteResult, ResultSet, RoutineInfo, RowChange, RowsRequest, TableInfo, TableRef,
     TableStructure,
 };
 use crate::docdb::FindResult;
 use crate::kv::{self, KeyValue, ScanPage};
+use crate::export;
 use crate::navicat;
 use crate::session::{Backend, SessionInfo};
 use crate::AppState;
@@ -243,6 +244,18 @@ pub async fn routine_definition(
 }
 
 #[tauri::command]
+pub async fn list_columns(
+    state: State<'_, AppState>,
+    session: String,
+    schema: String,
+) -> CmdResult<Vec<ColumnName>> {
+    driver!(state, session)
+        .list_columns(&schema)
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
 pub async fn table_structure(
     state: State<'_, AppState>,
     session: String,
@@ -292,6 +305,29 @@ pub async fn execute(
         .map_err(err)
 }
 
+/// Runs a `SELECT COUNT(*) …` on the pool (not the editor's connection, so a
+/// failure can't abort its transaction). Anything else is refused.
+#[tauri::command]
+pub async fn count_query(
+    state: State<'_, AppState>,
+    session: String,
+    sql: String,
+) -> CmdResult<Option<u64>> {
+    let head: String = sql.split_whitespace().take(2).collect::<Vec<_>>().join(" ");
+    if !head.eq_ignore_ascii_case("SELECT COUNT(*)") || sql.contains(';') {
+        return Err("only a single SELECT COUNT(*) is allowed".into());
+    }
+    let rs = driver!(state, session)
+        .query(&sql, 1)
+        .await
+        .map_err(err)?;
+    Ok(match rs.rows.first().and_then(|r| r.first()) {
+        Some(serde_json::Value::Number(n)) => n.as_u64(),
+        Some(serde_json::Value::String(s)) => s.parse().ok(),
+        _ => None,
+    })
+}
+
 #[tauri::command]
 pub async fn cancel_query(
     state: State<'_, AppState>,
@@ -321,6 +357,13 @@ pub async fn apply_changes(
     table: TableRef,
     changes: Vec<RowChange>,
 ) -> CmdResult<u64> {
+    let s = state.sessions.get(&session).await.map_err(err)?;
+    if s.profile.safety == connections::Safety::Readonly {
+        return Err(format!(
+            "{} is read-only: changes are not allowed",
+            s.profile.name
+        ));
+    }
     driver!(state, session)
         .apply_changes(&table, &changes)
         .await
@@ -382,6 +425,36 @@ pub async fn save_sql_file(
     };
     std::fs::write(&path, contents).map_err(|e| e.to_string())?;
     Ok(Some(path.display().to_string()))
+}
+
+/// Saves result rows to a file picked in a save dialog. `None` when cancelled.
+#[tauri::command]
+pub async fn export_result(
+    app: AppHandle,
+    format: export::Format,
+    name: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+) -> CmdResult<Option<String>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let ext = format.extension();
+    app.dialog()
+        .file()
+        .add_filter(format.label(), &[ext])
+        .set_file_name(format!("{name}.{ext}"))
+        .save_file(move |p| {
+            let _ = tx.send(p.and_then(|p| p.into_path().ok()));
+        });
+    let Some(path) = rx.await.ok().flatten() else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        export::write(&path, format, &columns, &rows).map(|()| path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|p| Some(p.display().to_string()))
+    .map_err(err)
 }
 
 #[tauri::command]

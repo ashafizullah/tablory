@@ -14,7 +14,7 @@
 <div class="backdrop">
   <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-msg">
     <p id="confirm-msg" class="msg">{app.confirm?.message}</p>
-    {#if app.confirm?.detail}<p class="muted">{app.confirm.detail}</p>{/if}
+    {#if app.confirm?.detail}<p class="muted detail">{app.confirm.detail}</p>{/if}
     <div class="actions">
       {#if app.confirm?.alt}
         <button class="btn alt" onclick={() => app.answer("alt")}>{app.confirm.alt}</button>
@@ -41,6 +41,7 @@
   }
   .dialog {
     width: 360px;
+    max-width: calc(100vw - 32px);
     padding: 18px;
     background: var(--panel);
     border: 1px solid var(--border);
@@ -50,6 +51,15 @@
   .msg {
     margin: 0 0 6px;
     font-weight: 600;
+  }
+  .detail {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 50vh;
+    overflow: auto;
+  }
+  .dialog:has(.detail) {
+    width: 480px;
   }
   .actions {
     display: flex;

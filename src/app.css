@@ -124,6 +124,11 @@ textarea {
   border-color: transparent;
   background: transparent;
 }
+/* A toggle that is switched on. */
+.btn.on {
+  background: var(--selection);
+  border-color: var(--accent);
+}
 
 .field {
   height: 26px;

@@ -10,6 +10,7 @@
   import CollectionView from "./CollectionView.svelte";
   import MongoCommand from "./MongoCommand.svelte";
   import RedisWorkspace from "./RedisWorkspace.svelte";
+  import SafetyBadge from "./SafetyBadge.svelte";
 
   const session = $derived(app.session);
   const queryLabel = $derived(session?.kind === "mongodb" ? "Command" : "SQL");
@@ -98,6 +99,7 @@
         <span class="swatch" style:background={session.color || "var(--muted)"}></span>
         <strong>{session.name}</strong>
         <span class="muted">{kindLabel[session.kind]}</span>
+        {#if session.safety !== "normal"}<SafetyBadge safety={session.safety} />{/if}
       </span>
       {#if session.database}
         <span class="muted db" data-tauri-drag-region>/ {session.kind === "redis" ? `db ${session.database}` : session.database}</span>
@@ -133,6 +135,19 @@
   {:else}
   <div class="body">
     <main class="main">
+      {#if app.txOpen}
+        <div class="txbar" class:failed={app.txFailed} role="status">
+          <strong>{app.txFailed ? "Transaction failed" : "Transaction open"}</strong>
+          <span>
+            {app.txFailed
+              ? "A statement failed: roll back to continue."
+              : "Changes are not saved until you commit. Other sessions don't see them yet."}
+          </span>
+          <span class="grow"></span>
+          <button class="btn" onclick={() => app.endTransaction(false)}>Roll back</button>
+          <button class="btn primary" onclick={() => app.endTransaction(true)} disabled={app.txFailed}>Commit</button>
+        </div>
+      {/if}
       {#if app.tabs.length > 0}
         <div class="tabs" role="tablist">
           {#each app.tabs as t (t.id)}
@@ -262,6 +277,22 @@
     min-width: 0;
     min-height: 0;
     background: var(--panel);
+  }
+  .txbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    padding: 5px 8px 5px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--edited);
+    font-size: 12px;
+  }
+  .txbar.failed {
+    background: var(--deleted);
+  }
+  .txbar .grow {
+    flex: 1;
   }
   .tabs {
     display: flex;

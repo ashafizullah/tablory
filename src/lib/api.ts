@@ -44,6 +44,12 @@ export const api = {
   listRoutines: (session: string, schema: string) => invoke<RoutineInfo[]>("list_routines", { session, schema }),
   routineDefinition: (session: string, schema: string, r: RoutineInfo) =>
     invoke<string>("routine_definition", { session, schema, kind: r.kind, id: r.id }),
+  listColumns: (session: string, schema: string) =>
+    invoke<{ table: string; column: string; data_type: string }[]>("list_columns", { session, schema }),
+  /** Runs a SELECT COUNT(*) on the pool, outside the editor's transaction. */
+  countQuery: (session: string, sql: string) => invoke<number | null>("count_query", { session, sql }),
+  exportResult: (format: "csv" | "json" | "xlsx", name: string, columns: string[], rows: unknown[][]) =>
+    invoke<string | null>("export_result", { format, name, columns, rows }),
   tableStructure: (session: string, table: TableRef) =>
     invoke<TableStructure>("table_structure", { session, table }),
   fetchRows: (session: string, request: RowsRequest) => invoke<ResultSet>("fetch_rows", { session, request }),

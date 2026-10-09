@@ -3,6 +3,7 @@ mod menu;
 pub mod connections;
 pub mod db;
 pub mod docdb;
+pub mod export;
 pub mod kv;
 pub mod navicat;
 pub mod session;
@@ -62,16 +63,19 @@ pub fn run() {
             commands::list_tables,
             commands::list_routines,
             commands::routine_definition,
+            commands::list_columns,
             commands::table_structure,
             commands::fetch_rows,
             commands::count_rows,
             commands::execute,
+            commands::count_query,
             commands::cancel_query,
             commands::preview_changes,
             commands::apply_changes,
             commands::pick_file,
             commands::save_sql_file,
             commands::open_sql_file,
+            commands::export_result,
             commands::check_updates,
             commands::app_version,
             commands::redis_scan,

@@ -28,6 +28,18 @@ pub enum SslMode {
     Require,
 }
 
+/// Guard rails for SQL connections.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Safety {
+    #[default]
+    Normal,
+    /// Statements and edits that change data ask for confirmation.
+    Production,
+    /// Statements and edits that change data are blocked.
+    Readonly,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SshAuth {
@@ -85,6 +97,7 @@ pub struct ConnectionProfile {
     pub auth_source: String,
     /// SQL Server: log in as the current Windows user instead of user/password.
     pub windows_auth: bool,
+    pub safety: Safety,
 }
 
 /// Passwords sent by the connection form. `None` keeps the stored value.

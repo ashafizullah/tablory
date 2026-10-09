@@ -3,14 +3,19 @@
   import { basicSetup } from "codemirror";
   import { Compartment, EditorState, Prec } from "@codemirror/state";
   import { EditorView } from "@codemirror/view";
-  import { sql as sqlLang } from "@codemirror/lang-sql";
+  import { sql as sqlLang, type SQLNamespace } from "@codemirror/lang-sql";
   import { app, type Tab } from "../lib/state/app.svelte";
   import { api, errorText } from "../lib/api";
   import { kindLabel, uid } from "../lib/cells";
   import { dialectFor, highlight, keymap, theme } from "../lib/codemirror";
   import { splitStatements, statementAt } from "../lib/sqlsplit";
   import type { ExecuteResult } from "../lib/types";
+  import { addHistory } from "../lib/history";
+  import { quoteIdent, tableFromSql } from "../lib/export";
   import DataGrid from "./DataGrid.svelte";
+  import ExportMenu from "./ExportMenu.svelte";
+  import HistoryPanel from "./HistoryPanel.svelte";
+  import SafetyBadge from "./SafetyBadge.svelte";
 
   let { tab, active }: { tab: Extract<Tab, { kind: "query" }>; active: boolean } = $props();
 
@@ -25,6 +30,8 @@
   let resultIndex = $state(0);
   let maxRows = $state(1000);
   let editorHeight = $state(260);
+  let showHistory = $state(false);
+  let historyVersion = $state(0);
 
   const session = $derived(app.session!);
   const mysql = $derived(session.kind === "mysql");
@@ -53,8 +60,14 @@
   });
 
   function languageExt() {
-    const schema: Record<string, string[]> = {};
-    for (const t of app.tables) schema[t.name] = [];
+    const schema: SQLNamespace = {};
+    for (const t of app.tables) {
+      schema[t.name] = (app.columns[t.name] ?? []).map((c) => ({
+        label: c.column,
+        type: "property",
+        detail: c.data_type,
+      }));
+    }
     return sqlLang({ dialect: dialectFor(session.kind), schema, upperCaseKeywords: true });
   }
 
@@ -73,11 +86,15 @@
     if (running) return;
     const sql = target(all).trim();
     if (!sql) return;
+    if (!(await app.guardSql(sql))) return;
+    if (running) return;
     const qid = uid();
     running = qid;
     error = null;
     ranSql = sql;
+    const db = session.database;
     try {
+      await app.beforeRun(sql);
       result = await api.execute(session.id, sql, maxRows, qid);
       // Show the last statement that returned rows, else the last one.
       let idx = result.statements.length - 1;
@@ -91,8 +108,40 @@
     } finally {
       running = null;
     }
+    app.afterRun(sql, error);
+    remember(sql, db);
     loadDefaultSchema();
   }
+
+  function remember(sql: string, database: string) {
+    const last = result?.statements.at(-1);
+    const shownResult = result?.statements[resultIndex]?.result;
+    addHistory(session.connection_id, {
+      sql,
+      at: Date.now(),
+      database,
+      ms: result?.duration_ms ?? 0,
+      error: error ?? undefined,
+      rows: error ? undefined : shownResult ? shownResult.rows.length : last?.rows_affected,
+    });
+    historyVersion++;
+  }
+
+  /** Puts SQL from the history at the cursor, on its own line. */
+  function insertSql(sql: string) {
+    if (!view) return;
+    const { from, to } = view.state.selection.main;
+    const doc = view.state.doc;
+    const before = from > 0 && doc.sliceString(from - 1, from) !== "\n" ? "\n" : "";
+    const text = before + sql.replace(/;?\s*$/, ";") + "\n";
+    view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } });
+    view.focus();
+  }
+
+  const exportTable = $derived.by(() => {
+    const t = tableFromSql(ranSql);
+    return t ?? quoteIdent(session.kind, "table_name");
+  });
 
   async function cancel() {
     if (!running) return;
@@ -129,9 +178,10 @@
     view.focus();
   });
 
-  // Keep autocomplete in sync with the table list.
+  // Keep autocomplete in sync with the table and column lists.
   $effect(() => {
     void app.tables;
+    void app.columns;
     view?.dispatch({ effects: language.reconfigure(languageExt()) });
   });
 
@@ -142,9 +192,15 @@
   onDestroy(() => view?.destroy());
 
   function onkeydown(e: KeyboardEvent) {
-    if (!active || app.confirm || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "s") return;
-    e.preventDefault();
-    app.saveQuery(tab, e.shiftKey);
+    if (!active || app.confirm || !(e.metaKey || e.ctrlKey)) return;
+    const key = e.key.toLowerCase();
+    if (key === "s") {
+      e.preventDefault();
+      app.saveQuery(tab, e.shiftKey);
+    } else if (key === "h" && e.shiftKey) {
+      e.preventDefault();
+      showHistory = !showHistory;
+    }
   }
 
   function startResize(e: MouseEvent) {
@@ -167,6 +223,9 @@
 <svelte:window {onkeydown} />
 
 <div class="qe">
+  {#if showHistory}
+    <HistoryPanel version={historyVersion} oninsert={insertSql} onclose={() => (showHistory = false)} />
+  {/if}
   <div class="toolbar">
     <button class="btn primary" onclick={() => run(false)} disabled={!!running} title="Run statement or selection (⌘↵)">
       Run <span class="kbd on-accent">⌘↵</span>
@@ -177,7 +236,18 @@
     {#if running}
       <button class="btn danger" onclick={cancel} disabled={session.kind === "sqlite"}>Cancel</button>
     {/if}
+    <label
+      class="check small"
+      title={app.manualCommit
+        ? "Changes stay in a transaction until you Commit or Roll back"
+        : "Each statement is committed as soon as it runs"}
+    >
+      <input type="checkbox" bind:checked={app.manualCommit} disabled={app.txOpen} /> Manual commit
+    </label>
     <span class="grow"></span>
+    <button class="btn" class:on={showHistory} onclick={() => (showHistory = !showHistory)} title="Query history (⇧⌘H)"
+      >History</button
+    >
     <button class="btn" onclick={() => app.saveQuery(tab)} title={tab.path ? `Save to ${tab.path} (⌘S)` : "Save as a .sql file (⌘S)"}>
       Save
     </button>
@@ -196,6 +266,7 @@
     <span class="swatch" style:background={session.color || "var(--muted)"}></span>
     <strong>{session.name}</strong>
     <span class="muted">{kindLabel[session.kind]}</span>
+    {#if session.safety !== "normal"}<SafetyBadge safety={session.safety} />{/if}
     <span class="sep" aria-hidden="true">›</span>
     <span class="icon" aria-hidden="true">⛁</span>
     <strong>{session.database || "(default database)"}</strong>
@@ -253,12 +324,23 @@
       <span>{result.duration_ms.toLocaleString()} ms</span>
     {/if}
     <span class="grow"></span>
+    {#if current?.result && !running}
+      <ExportMenu
+        kind={session.kind}
+        name={tab.title}
+        table={exportTable}
+        columns={current.result.columns.map((c) => c.name)}
+        rows={current.result.rows}
+        truncated={current.result.truncated}
+      />
+    {/if}
     <span>{session.database}</span>
   </footer>
 </div>
 
 <style>
   .qe {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -271,6 +353,13 @@
     padding: 6px 8px;
     border-bottom: 1px solid var(--border);
     background: var(--bg);
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    white-space: nowrap;
   }
   .grow {
     flex: 1;

@@ -7,6 +7,8 @@
   import DataGrid, { type Pending, type RowKey } from "./DataGrid.svelte";
   import StructureView from "./StructureView.svelte";
   import SqlPreview from "./SqlPreview.svelte";
+  import ExportMenu from "./ExportMenu.svelte";
+  import { quoteIdent } from "../lib/export";
 
   let { tab, active }: { tab: Extract<Tab, { kind: "table" }>; active: boolean } = $props();
 
@@ -55,7 +57,8 @@
   const session = $derived(app.session!);
   const pk = $derived(structure?.columns.filter((c) => c.primary_key).map((c) => c.name) ?? []);
   const isView = $derived(app.tables.find((t) => t.name === tab.table.name)?.kind === "view");
-  const editable = $derived(pk.length > 0 && !isView);
+  const readOnly = $derived(session.safety === "readonly");
+  const editable = $derived(pk.length > 0 && !isView && !readOnly);
   const changeCount = $derived(
     Object.keys(edits).filter((r) => !deleted[+r]).length +
       Object.values(deleted).filter(Boolean).length +
@@ -220,6 +223,7 @@
 
   async function commit() {
     if (changeCount === 0 || committing) return;
+    if (!(await app.guardEdits(changeCount))) return;
     committing = true;
     error = null;
     try {
@@ -319,7 +323,11 @@
 
     {#if !editable && structure && data}
       <div class="banner muted">
-        {isView ? "Views are read-only." : "Read-only: this table has no primary key, so rows can't be matched safely for edits."}
+        {readOnly
+          ? `Read-only: ${session.name} doesn't allow changes.`
+          : isView
+            ? "Views are read-only."
+            : "Read-only: this table has no primary key, so rows can't be matched safely for edits."}
       </div>
     {/if}
 
@@ -384,6 +392,16 @@
       <span class="saved" role="status">{notice}</span>
     {/if}
 
+    {#if view === "data" && data && changeCount === 0}
+      <ExportMenu
+        kind={session.kind}
+        name={tab.table.name}
+        table={`${quoteIdent(session.kind, tab.table.schema)}.${quoteIdent(session.kind, tab.table.name)}`}
+        columns={data.columns.map((c) => c.name)}
+        rows={data.rows}
+        truncated={hasNext || offset > 0}
+      />
+    {/if}
     {#if view === "data"}
       <span class="range muted">{loading ? "Loading…" : rangeText}</span>
       <button class="btn ghost" aria-label="Previous page" onclick={() => page(-1)} disabled={offset === 0 || loading}>‹</button>

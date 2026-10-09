@@ -1,6 +1,7 @@
 import { api, errorText } from "../api";
 import { uid } from "../cells";
-import type { ConnectionProfile, RoutineInfo, SessionInfo, TableInfo, TableRef } from "../types";
+import { checkScript, countSql, preview, type StatementCheck } from "../sqlguard";
+import type { ConnectionProfile, DbKind, RoutineInfo, SessionInfo, TableInfo, TableRef } from "../types";
 
 export type Tab =
   | { id: string; kind: "table"; table: TableRef; title: string; dirty: boolean }
@@ -29,6 +30,33 @@ const fileTitle = (path: string) => path.split(/[\\/]/).pop()!.replace(/\.sql$/i
 const QUERIES_KEY = (connectionId: string) => `tablory.queryTabs.${connectionId}`;
 type StoredQuery = Pick<QueryTab, "title" | "sql" | "path" | "saved">;
 
+/** Up to five "• item" lines, then a count of the rest. */
+function bullets<T>(items: T[], line: (item: T) => string): string {
+  const shown = items.slice(0, 5).map((it) => "• " + line(it));
+  if (items.length > 5) shown.push(`…and ${items.length - 5} more`);
+  return shown.join("\n");
+}
+
+const BEGIN: Partial<Record<DbKind, string>> = {
+  postgres: "BEGIN",
+  mysql: "START TRANSACTION",
+  sqlite: "BEGIN",
+  mssql: "BEGIN TRANSACTION",
+};
+
+/** Whether a statement starts or ends a transaction (SQL Server's BEGIN also opens TRY blocks). */
+function isTxControl(c: StatementCheck | undefined, kind: DbKind): "begin" | "end" | null {
+  if (!c) return null;
+  if (c.verb === "start" && c.next === "transaction") return "begin";
+  if (c.verb === "begin") {
+    if (kind === "mssql") return c.next === "tran" || c.next === "transaction" ? "begin" : null;
+    return kind === "mysql" && c.next !== "" && c.next !== "work" ? null : "begin";
+  }
+  if (c.verb === "commit" || c.verb === "end") return "end";
+  if (c.verb === "rollback") return c.next === "to" ? null : "end";
+  return null;
+}
+
 interface Confirm {
   message: string;
   detail?: string;
@@ -56,6 +84,8 @@ class AppState {
   schema = $state("");
   tables = $state<TableInfo[]>([]);
   routines = $state<RoutineInfo[]>([]);
+  /** Columns per table in the current schema, for autocomplete. */
+  columns = $state<Record<string, { column: string; data_type: string }[]>>({});
   tablesLoading = $state(false);
   sidebarError = $state<string | null>(null);
 
@@ -64,6 +94,13 @@ class AppState {
   queryCount = 0;
 
   confirm = $state<Confirm | null>(null);
+
+  /** The SQL editor wraps writes in a transaction until Commit or Rollback. */
+  manualCommit = $state(false);
+  /** A transaction is open on the editor's connection. */
+  txOpen = $state(false);
+  /** PostgreSQL: a statement failed, so the transaction only accepts ROLLBACK. */
+  txFailed = $state(false);
 
   async loadConnections() {
     [this.connections, this.groups, this.groupColors] = await Promise.all([
@@ -105,12 +142,16 @@ class AppState {
       const ok = await this.ask(`Discard unsaved changes and leave ${old.name}?`, { ok: "Discard", danger: true });
       if (!ok) return;
     }
+    if (old && !(await this.leaveTransaction(`leave ${old.name}`))) return;
     this.connecting = id;
     this.connectError = null;
     try {
       const s = await api.connect(id);
       this.session = s;
       this.view = "workspace";
+      this.manualCommit = s.safety === "production";
+      this.txOpen = this.txFailed = false;
+      this.columns = {};
       this.dbClosed = false;
       this.tabs = [];
       this.activeTab = null;
@@ -137,6 +178,8 @@ class AppState {
       const ok = await this.ask("Discard unsaved changes and disconnect?", { ok: "Disconnect", danger: true });
       if (!ok) return;
     }
+    if (!(await this.leaveTransaction("disconnect"))) return;
+    this.txOpen = this.txFailed = false;
     const id = this.session.id;
     this.session = null;
     this.tabs = [];
@@ -206,6 +249,7 @@ class AppState {
         api.listTables(s.id, this.schema),
         api.listRoutines(s.id, this.schema).catch(() => []),
       ]);
+      this.loadColumns();
     } catch (e) {
       this.sidebarError = errorText(e);
       this.tables = [];
@@ -238,6 +282,7 @@ class AppState {
       const ok = await this.ask(`Discard unsaved changes and switch to ${db}?`, { ok: "Switch", danger: true });
       if (!ok) return;
     }
+    if (!(await this.leaveTransaction(`switch to ${db}`))) return;
     try {
       s.database = await api.switchDatabase(s.id, db);
       this.dbClosed = false;
@@ -311,6 +356,135 @@ class AppState {
     };
     this.tabs.push(tab);
     this.activeTab = tab.id;
+  }
+
+  /**
+   * Checks SQL against the connection's safety mode before it runs: blocks
+   * writes on a read-only connection, and asks before risky statements (or,
+   * on production, any write). Resolves true when the SQL may run.
+   */
+  async guardSql(sql: string): Promise<boolean> {
+    const s = this.session;
+    if (!s) return false;
+    const mysql = s.kind === "mysql";
+    const checks = checkScript(sql, mysql);
+    const writes = checks.filter((c) => c.writes);
+    const where = `${s.name}${s.database ? ` / ${s.database}` : ""}`;
+    if (s.safety === "readonly" && writes.length) {
+      const n = writes.length === 1 ? "a statement" : `${writes.length} statements`;
+      await this.ask(`${s.name} is read-only.`, {
+        detail: `Blocked ${n} that change data:\n\n${bullets(writes, (c) => preview(c.sql))}`,
+        ok: "OK",
+      });
+      return false;
+    }
+    const risky = checks.filter((c) => c.danger);
+    const shown = risky.length ? risky : s.safety === "production" ? writes : [];
+    if (!shown.length) return true;
+
+    const counts = await this.countRows(shown.slice(0, 5).map((c) => c.sql));
+    const line = (c: StatementCheck, i: number) => {
+      const head = c.danger ? `${c.danger}:\n   ${preview(c.sql)}` : preview(c.sql);
+      const n = counts[i];
+      if (n == null) return head;
+      return `${head}\n   → ${n.toLocaleString()} row${n === 1 ? "" : "s"} ${c.verb === "delete" ? "deleted" : "updated"}`;
+    };
+    let detail = bullets(shown, (c) => line(c, shown.indexOf(c)));
+    if (this.manualCommit) detail += "\n\nRuns in a transaction: you can still roll it back.";
+    if (risky.length) {
+      const n = risky.length === 1 ? "a risky statement" : `${risky.length} risky statements`;
+      return this.ask(`Run ${n} on ${where}?`, { detail, ok: "Run anyway", danger: true });
+    }
+    return this.ask(`Change data on production ${where}?`, { detail, ok: "Run", danger: true });
+  }
+
+  /** Rows each UPDATE/DELETE would touch, where it can be counted quickly. */
+  private async countRows(sqls: string[]): Promise<(number | null)[]> {
+    const s = this.session;
+    if (!s) return sqls.map(() => null);
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 4000));
+    return Promise.all(
+      sqls.map((q) => {
+        const c = countSql(q, s.kind === "mysql");
+        if (!c) return null;
+        return Promise.race([api.countQuery(s.id, c).catch(() => null), timeout]);
+      }),
+    );
+  }
+
+  /** Opens a transaction before SQL that writes, in manual-commit mode. */
+  async beforeRun(sql: string) {
+    const s = this.session;
+    if (!s || !this.manualCommit || this.txOpen) return;
+    const checks = checkScript(sql, s.kind === "mysql");
+    if (!checks.some((c) => c.writes) || isTxControl(checks[0], s.kind)) return;
+    await api.execute(s.id, BEGIN[s.kind] ?? "BEGIN", 1, uid());
+    this.txOpen = true;
+    this.txFailed = false;
+  }
+
+  /** Follows BEGIN/COMMIT/ROLLBACK typed by hand, and errors that end a transaction. */
+  afterRun(sql: string, error: string | null) {
+    const s = this.session;
+    if (!s) return;
+    for (const c of checkScript(sql, s.kind === "mysql")) {
+      const tx = isTxControl(c, s.kind);
+      if (tx === "begin") this.txOpen = true;
+      else if (tx === "end") this.txOpen = this.txFailed = false;
+      // MySQL commits implicitly before DDL.
+      else if (s.kind === "mysql" && ["create", "alter", "drop", "truncate", "rename"].includes(c.verb)) this.txOpen = false;
+    }
+    if (error && this.txOpen) {
+      // PostgreSQL rejects everything until ROLLBACK; SQL Server's cancel kills the session.
+      if (s.kind === "postgres") this.txFailed = true;
+      if (s.kind === "mssql" && /cancelled/i.test(error)) this.txOpen = false;
+    }
+  }
+
+  async endTransaction(commit: boolean) {
+    const s = this.session;
+    if (!s || !this.txOpen) return;
+    try {
+      await api.execute(s.id, commit ? "COMMIT" : "ROLLBACK", 1, uid());
+      this.txOpen = this.txFailed = false;
+    } catch (e) {
+      await this.ask(commit ? "Commit failed." : "Rollback failed.", { detail: errorText(e) });
+    }
+  }
+
+  /** Asks before an action that would drop an open transaction. */
+  private async leaveTransaction(action: string): Promise<boolean> {
+    if (!this.txOpen) return true;
+    const ok = await this.ask(`Roll back the open transaction and ${action}?`, {
+      detail: "Changes that are not committed will be lost.",
+      ok: "Roll back",
+      danger: true,
+    });
+    if (ok) await this.endTransaction(false);
+    return ok;
+  }
+
+  async loadColumns() {
+    const s = this.session;
+    if (!s || s.kind === "redis" || s.kind === "mongodb" || !this.schema) return;
+    try {
+      const cols: Record<string, { column: string; data_type: string }[]> = {};
+      for (const c of await api.listColumns(s.id, this.schema)) (cols[c.table] ??= []).push(c);
+      if (this.session === s) this.columns = cols;
+    } catch {
+      this.columns = {};
+    }
+  }
+
+  /** The same rules for edits made in the table grid. */
+  async guardEdits(count: number): Promise<boolean> {
+    const s = this.session;
+    if (!s || s.safety === "normal") return true;
+    if (s.safety === "readonly") {
+      await this.ask(`${s.name} is read-only.`, { detail: "Edits can't be saved on this connection.", ok: "OK" });
+      return false;
+    }
+    return this.ask(`Save ${count} change${count === 1 ? "" : "s"} to production ${s.name}?`, { ok: "Save", danger: true });
   }
 
   /** Writes a query tab to its file, or asks where first (`as`, or never saved). */
