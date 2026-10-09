@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app } from "../lib/state/app.svelte";
   import { api, errorText } from "../lib/api";
-  import { kindLabel } from "../lib/cells";
+  import { COLORS, kindLabel } from "../lib/cells";
   import type { ConnectionProfile, DbKind, Secrets } from "../lib/types";
 
   let {
@@ -17,7 +17,6 @@
     ondeleted: () => void;
   } = $props();
 
-  const COLORS = ["#6e6e73", "#2563eb", "#16a34a", "#d97706", "#dc2626", "#9333ea"];
   const KINDS: DbKind[] = ["postgres", "mysql", "mssql", "sqlite", "redis", "mongodb"];
   const DEFAULT_PORT: Partial<Record<DbKind, number>> = {
     postgres: 5432,

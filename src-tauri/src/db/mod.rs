@@ -33,6 +33,16 @@ pub struct TableInfo {
     pub kind: String,
 }
 
+#[derive(Serialize, Debug)]
+pub struct RoutineInfo {
+    pub name: String,
+    /// "function" or "procedure".
+    pub kind: String,
+    /// What [`Driver::routine_definition`] looks it up by: the object id on
+    /// PostgreSQL (overloads share a name) and SQL Server, else the name.
+    pub id: String,
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct TableRef {
     pub schema: String,
@@ -182,6 +192,93 @@ pub trait Driver: Send + Sync {
     async fn query(&self, sql: &str, max_rows: usize) -> Result<ResultSet>;
     async fn apply_changes(&self, table: &TableRef, changes: &[RowChange]) -> Result<u64>;
     async fn close(&self);
+
+    /// User-defined functions and procedures in the schema.
+    async fn list_routines(&self, schema: &str) -> Result<Vec<RoutineInfo>> {
+        let d = self.dialect();
+        let s = sql::quote_literal(d, schema);
+        let q = match d {
+            // Skips aggregates and functions that belong to an extension.
+            Dialect::Postgres => format!(
+                "SELECT p.proname::text,
+                        CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END,
+                        p.oid::text
+                 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = {s} AND p.prokind IN ('f', 'p')
+                   AND NOT EXISTS (SELECT 1 FROM pg_depend e
+                                   WHERE e.classid = 'pg_proc'::regclass
+                                     AND e.objid = p.oid AND e.deptype = 'e')
+                 ORDER BY 1"
+            ),
+            Dialect::Mysql => format!(
+                "SELECT CAST(ROUTINE_NAME AS CHAR), CAST(LOWER(ROUTINE_TYPE) AS CHAR),
+                        CAST(ROUTINE_NAME AS CHAR)
+                 FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = {s} ORDER BY 1"
+            ),
+            Dialect::Mssql => format!(
+                "SELECT o.name,
+                        CASE WHEN o.type IN ('P', 'PC') THEN 'procedure' ELSE 'function' END,
+                        CAST(o.object_id AS varchar(20))
+                 FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id
+                 WHERE s.name = {s} AND o.is_ms_shipped = 0
+                   AND o.type IN ('P', 'PC', 'FN', 'IF', 'TF', 'FS', 'FT')
+                 ORDER BY o.name"
+            ),
+            Dialect::Sqlite => return Ok(Vec::new()),
+        };
+        let rs = self.query(&q, 100_000).await?;
+        let text = |v: Option<&Value>| match v {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Null) | None => String::new(),
+            Some(v) => v.to_string(),
+        };
+        Ok(rs
+            .rows
+            .iter()
+            .map(|r| RoutineInfo {
+                name: text(r.first()),
+                kind: text(r.get(1)),
+                id: text(r.get(2)),
+            })
+            .collect())
+    }
+
+    /// CREATE statement of a routine from [`Driver::list_routines`].
+    async fn routine_definition(&self, schema: &str, kind: &str, id: &str) -> Result<String> {
+        let d = self.dialect();
+        let (q, col) = match d {
+            Dialect::Postgres => {
+                let oid: u32 = id.parse()?;
+                (format!("SELECT pg_get_functiondef({oid})"), 0)
+            }
+            Dialect::Mysql => {
+                let what = if kind == "procedure" {
+                    "PROCEDURE"
+                } else {
+                    "FUNCTION"
+                };
+                let name = sql::qualified(
+                    d,
+                    &TableRef {
+                        schema: schema.to_owned(),
+                        name: id.to_owned(),
+                    },
+                );
+                // Columns: name, sql_mode, "Create Function|Procedure", ...
+                (format!("SHOW CREATE {what} {name}"), 2)
+            }
+            Dialect::Mssql => {
+                let oid: i64 = id.parse()?;
+                (format!("SELECT OBJECT_DEFINITION({oid})"), 0)
+            }
+            Dialect::Sqlite => anyhow::bail!("SQLite has no stored routines"),
+        };
+        let rs = self.query(&q, 1).await?;
+        match rs.rows.first().and_then(|r| r.get(col)) {
+            Some(Value::String(s)) => Ok(s.clone()),
+            _ => anyhow::bail!("the definition is not visible (missing permission?)"),
+        }
+    }
 
     async fn fetch_rows(&self, req: &RowsRequest) -> Result<ResultSet> {
         let sql = sql::build_select(self.dialect(), req);

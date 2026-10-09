@@ -6,6 +6,7 @@ import type {
   RedisKey,
   RedisValue,
   ResultSet,
+  RoutineInfo,
   RowChange,
   RowsRequest,
   Secrets,
@@ -24,6 +25,8 @@ export const api = {
   saveConnection: (profile: ConnectionProfile, secrets: Secrets) =>
     invoke<ConnectionProfile>("save_connection", { profile, secrets }),
   listGroups: () => invoke<string[]>("list_groups"),
+  listGroupColors: () => invoke<Record<string, string>>("list_group_colors"),
+  setGroupColor: (name: string, color: string) => invoke<void>("set_group_color", { name, color }),
   createGroup: (name: string) => invoke<string>("create_group", { name }),
   renameGroup: (from: string, to: string) => invoke<void>("rename_group", { from, to }),
   deleteGroup: (name: string) => invoke<void>("delete_group", { name }),
@@ -38,6 +41,9 @@ export const api = {
   listDatabases: (session: string) => invoke<string[]>("list_databases", { session }),
   listSchemas: (session: string) => invoke<string[]>("list_schemas", { session }),
   listTables: (session: string, schema: string) => invoke<TableInfo[]>("list_tables", { session, schema }),
+  listRoutines: (session: string, schema: string) => invoke<RoutineInfo[]>("list_routines", { session, schema }),
+  routineDefinition: (session: string, schema: string, r: RoutineInfo) =>
+    invoke<string>("routine_definition", { session, schema, kind: r.kind, id: r.id }),
   tableStructure: (session: string, table: TableRef) =>
     invoke<TableStructure>("table_structure", { session, table }),
   fetchRows: (session: string, request: RowsRequest) => invoke<ResultSet>("fetch_rows", { session, request }),

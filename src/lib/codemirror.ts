@@ -14,6 +14,8 @@ export const theme = EditorView.theme({
   "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--panel)", color: "var(--text)" },
   ".cm-scroller": { fontFamily: "var(--mono)", lineHeight: "1.55" },
   ".cm-content": { caretColor: "var(--text)" },
+  // drawSelection hides the native caret and draws its own, black by default.
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text)", borderLeftWidth: "1.5px" },
   ".cm-gutters": { backgroundColor: "var(--bg)", color: "var(--muted)", border: "none", borderRight: "1px solid var(--border)" },
   ".cm-activeLine": { backgroundColor: "transparent" },
   ".cm-activeLineGutter": { backgroundColor: "var(--hover)" },

@@ -1,6 +1,7 @@
 //! Saved connection profiles (connections.json) and their secrets, which live
 //! in the OS keychain rather than on disk.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -110,6 +111,8 @@ pub struct Store {
     file: PathBuf,
     /// Group names in display order, so empty groups survive.
     groups_file: PathBuf,
+    /// Group name -> tag color.
+    group_colors_file: PathBuf,
 }
 
 impl Store {
@@ -117,6 +120,7 @@ impl Store {
         Self {
             file: config_dir.join("connections.json"),
             groups_file: config_dir.join("groups.json"),
+            group_colors_file: config_dir.join("group_colors.json"),
         }
     }
 
@@ -158,6 +162,25 @@ impl Store {
         Ok(groups)
     }
 
+    pub fn group_colors(&self) -> Result<HashMap<String, String>> {
+        match std::fs::read_to_string(&self.group_colors_file) {
+            Ok(s) => serde_json::from_str(&s).context("group_colors.json is corrupt"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// An empty color clears it.
+    pub fn set_group_color(&self, name: &str, color: &str) -> Result<()> {
+        let mut colors = self.group_colors()?;
+        if color.is_empty() {
+            colors.remove(name);
+        } else {
+            colors.insert(name.to_owned(), color.to_owned());
+        }
+        write_json(&self.group_colors_file, &colors)
+    }
+
     pub fn create_group(&self, name: &str) -> Result<String> {
         let name = name.trim();
         if name.is_empty() {
@@ -185,6 +208,12 @@ impl Store {
             *g = to.to_owned();
         }
         write_json(&self.groups_file, &groups)?;
+        // The color follows the rename unless merging into a colored group.
+        let mut colors = self.group_colors()?;
+        if let Some(c) = colors.remove(from) {
+            colors.entry(to.to_owned()).or_insert(c);
+            write_json(&self.group_colors_file, &colors)?;
+        }
         self.regroup(from, to)
     }
 
@@ -193,6 +222,7 @@ impl Store {
         let mut groups = self.groups()?;
         groups.retain(|g| g != name);
         write_json(&self.groups_file, &groups)?;
+        self.set_group_color(name, "")?;
         self.regroup(name, "")
     }
 

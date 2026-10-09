@@ -56,6 +56,13 @@ export interface TableInfo {
   kind: "table" | "view";
 }
 
+export interface RoutineInfo {
+  name: string;
+  kind: "function" | "procedure";
+  /** Lookup key for the definition (object id on PostgreSQL / SQL Server). */
+  id: string;
+}
+
 export interface ColumnInfo {
   name: string;
   data_type: string;

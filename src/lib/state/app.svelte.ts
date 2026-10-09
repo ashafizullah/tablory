@@ -1,6 +1,6 @@
 import { api, errorText } from "../api";
 import { uid } from "../cells";
-import type { ConnectionProfile, SessionInfo, TableInfo, TableRef } from "../types";
+import type { ConnectionProfile, RoutineInfo, SessionInfo, TableInfo, TableRef } from "../types";
 
 export type Tab =
   | { id: string; kind: "table"; table: TableRef; title: string; dirty: boolean }
@@ -19,6 +19,7 @@ interface Confirm {
 class AppState {
   connections = $state<ConnectionProfile[]>([]);
   groups = $state<string[]>([]);
+  groupColors = $state<Record<string, string>>({});
   session = $state<SessionInfo | null>(null);
   connecting = $state<string | null>(null);
   connectError = $state<string | null>(null);
@@ -27,6 +28,7 @@ class AppState {
   schemas = $state<string[]>([]);
   schema = $state("");
   tables = $state<TableInfo[]>([]);
+  routines = $state<RoutineInfo[]>([]);
   tablesLoading = $state(false);
   sidebarError = $state<string | null>(null);
 
@@ -37,7 +39,11 @@ class AppState {
   confirm = $state<Confirm | null>(null);
 
   async loadConnections() {
-    [this.connections, this.groups] = await Promise.all([api.listConnections(), api.listGroups()]);
+    [this.connections, this.groups, this.groupColors] = await Promise.all([
+      api.listConnections(),
+      api.listGroups(),
+      api.listGroupColors(),
+    ]);
   }
 
   ask(message: string, opts: { detail?: string; ok?: string; danger?: boolean } = {}): Promise<boolean> {
@@ -51,7 +57,14 @@ class AppState {
     this.confirm = null;
   }
 
+  /** Connects, replacing the current session once the new one is open. */
   async connect(id: string) {
+    if (this.connecting) return;
+    const old = this.session;
+    if (old && this.tabs.some((t) => t.dirty)) {
+      const ok = await this.ask(`Discard unsaved changes and leave ${old.name}?`, { ok: "Discard", danger: true });
+      if (!ok) return;
+    }
     this.connecting = id;
     this.connectError = null;
     try {
@@ -60,6 +73,12 @@ class AppState {
       this.tabs = [];
       this.activeTab = null;
       this.queryCount = 0;
+      this.tables = [];
+      this.routines = [];
+      this.schemas = [];
+      this.databases = [];
+      this.schema = "";
+      if (old) api.disconnect(old.id).catch(() => {});
       await this.loadSidebar();
     } catch (e) {
       this.connectError = errorText(e);
@@ -78,6 +97,7 @@ class AppState {
     this.session = null;
     this.tabs = [];
     this.tables = [];
+    this.routines = [];
     this.schemas = [];
     this.databases = [];
     await api.disconnect(id).catch(() => {});
@@ -110,15 +130,21 @@ class AppState {
     const s = this.session;
     if (!s || !this.schema) {
       this.tables = [];
+      this.routines = [];
       return;
     }
     this.tablesLoading = true;
     this.sidebarError = null;
     try {
-      this.tables = await api.listTables(s.id, this.schema);
+      // Routines are a bonus: a permission error there keeps the tables.
+      [this.tables, this.routines] = await Promise.all([
+        api.listTables(s.id, this.schema),
+        api.listRoutines(s.id, this.schema).catch(() => []),
+      ]);
     } catch (e) {
       this.sidebarError = errorText(e);
       this.tables = [];
+      this.routines = [];
     } finally {
       this.tablesLoading = false;
     }
@@ -182,7 +208,18 @@ class AppState {
     this.activeTab = tab.id;
   }
 
-  newQuery(sql = "") {
+  /** Opens a routine's CREATE statement in a new query tab. */
+  async openRoutine(r: RoutineInfo) {
+    const s = this.session;
+    if (!s) return;
+    try {
+      this.newQuery(await api.routineDefinition(s.id, this.schema, r), r.name);
+    } catch (e) {
+      this.sidebarError = errorText(e);
+    }
+  }
+
+  newQuery(sql = "", title?: string) {
     this.queryCount += 1;
     if (this.session?.kind === "mongodb") {
       const tab: Tab = {
@@ -196,7 +233,7 @@ class AppState {
       this.activeTab = tab.id;
       return;
     }
-    const tab: Tab = { id: uid(), kind: "query", title: `Query ${this.queryCount}`, sql, dirty: false };
+    const tab: Tab = { id: uid(), kind: "query", title: title ?? `Query ${this.queryCount}`, sql, dirty: false };
     this.tabs.push(tab);
     this.activeTab = tab.id;
   }

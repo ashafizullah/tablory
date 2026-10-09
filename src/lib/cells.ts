@@ -1,5 +1,8 @@
 import type { Binary, Cell, DbKind } from "./types";
 
+/** Tag colors for connections and groups. */
+export const COLORS = ["#6e6e73", "#2563eb", "#16a34a", "#d97706", "#dc2626", "#9333ea"];
+
 export const isBinary = (c: Cell): c is Binary => typeof c === "object" && c !== null && "$bin" in c;
 
 /** One-line text for a grid cell. */

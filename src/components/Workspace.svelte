@@ -2,7 +2,7 @@
   import { app } from "../lib/state/app.svelte";
   import { isMac } from "../lib/api";
   import { kindLabel } from "../lib/cells";
-  import Sidebar from "./Sidebar.svelte";
+  import ConnectionRail from "./ConnectionRail.svelte";
   import TableView from "./TableView.svelte";
   import QueryEditor from "./QueryEditor.svelte";
   import CollectionView from "./CollectionView.svelte";
@@ -11,6 +11,22 @@
 
   const session = $derived(app.session!);
   const queryLabel = $derived(session.kind === "mongodb" ? "Command" : "SQL");
+
+  const RAIL_KEY = "tablory.connectionRail";
+  let showRail = $state(readRail());
+  function readRail() {
+    try {
+      return localStorage.getItem(RAIL_KEY) !== "hidden";
+    } catch {
+      return true;
+    }
+  }
+  function toggleRail() {
+    showRail = !showRail;
+    try {
+      localStorage.setItem(RAIL_KEY, showRail ? "shown" : "hidden");
+    } catch {}
+  }
 
   function onkeydown(e: KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
@@ -21,6 +37,9 @@
     } else if (e.key === "w") {
       e.preventDefault();
       if (app.activeTab) app.closeTab(app.activeTab);
+    } else if (e.key === "b") {
+      e.preventDefault();
+      toggleRail();
     } else if (e.key === "k") {
       e.preventDefault();
       app.disconnect();
@@ -32,29 +51,21 @@
 
 <div class="ws">
   <header class="toolbar" class:mac={isMac} data-tauri-drag-region>
+    <button
+      class="btn ghost rail-toggle"
+      class:on={showRail}
+      onclick={toggleRail}
+      title="{showRail ? 'Hide' : 'Show'} connections (⌘B)"
+      aria-label="{showRail ? 'Hide' : 'Show'} connections"
+      aria-pressed={showRail}>☰</button
+    >
     <span class="conn" data-tauri-drag-region>
       <span class="swatch" style:background={session.color || "var(--muted)"}></span>
       <strong>{session.name}</strong>
       <span class="muted">{kindLabel[session.kind]}</span>
     </span>
-    {#if (session.kind === "postgres" || session.kind === "mssql") && app.databases.length > 0}
-      <select
-        class="field db"
-        aria-label="Database"
-        value={session.database}
-        onchange={(e) => app.switchDatabase(e.currentTarget.value)}
-      >
-        {#each app.databases as db}<option value={db}>{db}</option>{/each}
-      </select>
-    {:else if session.kind === "redis" && app.databases.length > 0}
-      <select
-        class="field db"
-        aria-label="Database"
-        value={session.database}
-        onchange={(e) => app.switchDatabase(e.currentTarget.value)}
-      >
-        {#each app.databases as db}<option value={db}>db {db}</option>{/each}
-      </select>
+    {#if session.database}
+      <span class="muted db" data-tauri-drag-region>/ {session.kind === "redis" ? `db ${session.database}` : session.database}</span>
     {/if}
     <span class="spacer" data-tauri-drag-region></span>
     {#if session.kind !== "redis"}
@@ -63,11 +74,14 @@
     <button class="btn" onclick={() => app.disconnect()} title="Back to connections (⌘K)">Disconnect</button>
   </header>
 
+  <div class="frame" class:with-rail={showRail}>
+  {#if showRail}<ConnectionRail />{/if}
+  <div class="content">
+  {#key session.id}
   {#if session.kind === "redis"}
     {#key session.database}<RedisWorkspace />{/key}
   {:else}
   <div class="body">
-    <Sidebar />
     <main class="main">
       {#if app.tabs.length > 0}
         <div class="tabs" role="tablist">
@@ -117,6 +131,9 @@
     </main>
   </div>
   {/if}
+  {/key}
+  </div>
+  </div>
 </div>
 
 <style>
@@ -150,19 +167,44 @@
     border-radius: 3px;
   }
   .db {
-    max-width: 200px;
+    max-width: 240px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .spacer {
     flex: 1;
     align-self: stretch;
   }
-  .body {
+  .frame {
     flex: 1;
     display: grid;
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .frame.with-rail {
+    grid-template-columns: 260px 1fr;
+  }
+  .content {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .rail-toggle {
+    padding: 0 7px;
+    color: var(--muted);
+  }
+  .rail-toggle.on {
+    color: var(--text);
+  }
+  .body {
+    flex: 1;
+    display: flex;
     min-height: 0;
   }
   .main {
+    flex: 1;
     display: flex;
     flex-direction: column;
     min-width: 0;

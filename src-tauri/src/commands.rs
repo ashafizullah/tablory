@@ -1,11 +1,14 @@
 //! Tauri commands. Thin wrappers: errors become strings for the frontend.
 
+use std::collections::HashMap;
+
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::connections::{self, ConnectionProfile, Secrets};
 use crate::db::{
-    ExecuteResult, ResultSet, RowChange, RowsRequest, TableInfo, TableRef, TableStructure,
+    ExecuteResult, ResultSet, RoutineInfo, RowChange, RowsRequest, TableInfo, TableRef,
+    TableStructure,
 };
 use crate::docdb::FindResult;
 use crate::kv::{self, KeyValue, ScanPage};
@@ -38,6 +41,16 @@ pub fn save_connection(
 #[tauri::command]
 pub fn list_groups(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
     state.store.groups().map_err(err)
+}
+
+#[tauri::command]
+pub fn list_group_colors(state: State<'_, AppState>) -> CmdResult<HashMap<String, String>> {
+    state.store.group_colors().map_err(err)
+}
+
+#[tauri::command]
+pub fn set_group_color(state: State<'_, AppState>, name: String, color: String) -> CmdResult<()> {
+    state.store.set_group_color(&name, &color).map_err(err)
 }
 
 #[tauri::command]
@@ -201,6 +214,32 @@ pub async fn list_tables(
         Backend::Mongo(m) => m.collections(&schema).await.map_err(err),
         Backend::Redis(_) => Ok(Vec::new()),
     }
+}
+
+#[tauri::command]
+pub async fn list_routines(
+    state: State<'_, AppState>,
+    session: String,
+    schema: String,
+) -> CmdResult<Vec<RoutineInfo>> {
+    match backend!(state, session) {
+        Backend::Sql(d) => d.list_routines(&schema).await.map_err(err),
+        _ => Ok(Vec::new()),
+    }
+}
+
+#[tauri::command]
+pub async fn routine_definition(
+    state: State<'_, AppState>,
+    session: String,
+    schema: String,
+    kind: String,
+    id: String,
+) -> CmdResult<String> {
+    driver!(state, session)
+        .routine_definition(&schema, &kind, &id)
+        .await
+        .map_err(err)
 }
 
 #[tauri::command]

@@ -2,7 +2,7 @@
   import { app } from "../lib/state/app.svelte";
   import { onMount } from "svelte";
   import { api, errorText, invoke, isMac } from "../lib/api";
-  import { kindLabel } from "../lib/cells";
+  import { COLORS, kindLabel } from "../lib/cells";
   import type { ConnectionProfile } from "../lib/types";
   import ConnectionForm from "./ConnectionForm.svelte";
 
@@ -143,13 +143,16 @@
 
   // ---- Right-click menu ----
 
-  type MenuItem = { label: string; action: () => void; danger?: boolean } | "sep";
+  type MenuItem =
+    | { label: string; action: () => void; danger?: boolean }
+    | { colors: string[]; current: string; pick: (c: string) => void }
+    | "sep";
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   function openMenu(e: MouseEvent, items: MenuItem[]) {
     e.preventDefault();
     e.stopPropagation();
-    const h = items.reduce((n, i) => n + (i === "sep" ? 9 : 26), 10);
+    const h = items.reduce((n, i) => n + (i === "sep" ? 9 : "colors" in i ? 32 : 26), 10);
     menu = {
       x: Math.min(e.clientX, window.innerWidth - 210),
       y: Math.max(4, Math.min(e.clientY, window.innerHeight - h - 4)),
@@ -170,6 +173,12 @@
     openMenu(e, [
       { label: "New connection here", action: () => newConnection(g) },
       { label: "Rename group", action: () => ((creating = null), (renaming = g)) },
+      {
+        colors: COLORS,
+        current: app.groupColors[g] ?? "",
+        pick: (c) => run(() => api.setGroupColor(g, c === app.groupColors[g] ? "" : c)),
+      },
+      "sep",
       { label: "Delete group", danger: true, action: () => run(() => api.deleteGroup(g)) },
       "sep",
       { label: "New group", action: () => startNewGroup() },
@@ -305,7 +314,8 @@
             {:else}
               <button class="group-name" aria-expanded={open} onclick={() => toggle(g)} ondblclick={() => (renaming = g)}>
                 <span class="chevron" class:closed={!open}>▾</span>
-                <span class="label">{g}</span>
+                {#if app.groupColors[g]}<span class="folder" style:background={app.groupColors[g]}></span>{/if}
+                <span class="label" style:color={app.groupColors[g]}>{g}</span>
               </button>
               <span class="count muted">{list.length}</span>
             {/if}
@@ -388,6 +398,22 @@
     {#each menu.items as m}
       {#if m === "sep"}
         <hr />
+      {:else if "colors" in m}
+        <div class="menu-colors" role="group" aria-label="Group color">
+          {#each m.colors as c}
+            <button
+              class="color"
+              class:on={m.current === c}
+              style:background={c}
+              aria-label="Color {c}"
+              title={m.current === c ? "Remove color" : "Set color"}
+              onclick={() => {
+                menu = null;
+                m.pick(c);
+              }}
+            ></button>
+          {/each}
+        </div>
       {:else}
         <button
           role="menuitem"
@@ -620,6 +646,30 @@
   .menu button:hover {
     background: var(--accent);
     color: var(--accent-text);
+  }
+  .menu-colors {
+    display: flex;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .menu .menu-colors .color {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+  }
+  .menu .menu-colors .color:hover {
+    transform: scale(1.12);
+  }
+  .menu .menu-colors .color.on {
+    border-color: var(--text);
+  }
+  .folder {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex: none;
   }
   .menu .danger {
     color: var(--danger);
