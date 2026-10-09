@@ -82,6 +82,8 @@ pub struct ConnectionProfile {
     pub uri: String,
     /// MongoDB: database the user is defined in (default "admin").
     pub auth_source: String,
+    /// SQL Server: log in as the current Windows user instead of user/password.
+    pub windows_auth: bool,
 }
 
 /// Passwords sent by the connection form. `None` keeps the stored value.

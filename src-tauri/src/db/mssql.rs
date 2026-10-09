@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use futures_util::TryStreamExt;
 use serde_json::Value;
 use tiberius::{
-    AuthMethod, Client, ColumnData, Config, EncryptionLevel, FromSql, QueryItem, Row, ToSql,
+    AuthMethod, Client, ColumnData, Config, EncryptionLevel, FromSql, QueryItem, Row, SqlBrowser,
+    ToSql,
 };
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -20,10 +21,16 @@ use super::sql::{build_change, check_change};
 use super::*;
 use crate::connections::SslMode;
 
-type Conn = Client<Compat<TcpStream>>;
+/// TCP, or a named pipe for LocalDB.
+trait Io: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync> Io for T {}
+
+type Conn = Client<Compat<Box<dyn Io>>>;
 
 pub struct MssqlDriver {
     config: Config,
+    /// LocalDB instance name; connections go over its named pipe.
+    localdb: Option<String>,
     meta: Mutex<Conn>,
     /// Dedicated editor connection with its session id (@@SPID).
     editor: Mutex<Option<(Conn, i16)>>,
@@ -31,15 +38,68 @@ pub struct MssqlDriver {
     cancelled: std::sync::Mutex<HashSet<String>>,
 }
 
-async fn open(config: &Config) -> Result<Conn> {
-    let tcp = tokio::time::timeout(
-        Duration::from_secs(15),
-        TcpStream::connect(config.get_addr()),
-    )
-    .await
-    .context("connection timed out")??;
-    tcp.set_nodelay(true)?;
-    Ok(Client::connect(config.clone(), tcp.compat_write()).await?)
+async fn open(config: &Config, localdb: Option<&str>) -> Result<Conn> {
+    let stream: Box<dyn Io> = match localdb {
+        Some(instance) => Box::new(localdb_pipe(instance).await?),
+        None => {
+            // connect_named resolves a named instance through SQL Browser
+            // and is a plain TCP connect otherwise.
+            let tcp =
+                tokio::time::timeout(Duration::from_secs(15), TcpStream::connect_named(config))
+                    .await
+                    .context("connection timed out")??;
+            tcp.set_nodelay(true)?;
+            Box::new(tcp)
+        }
+    };
+    Ok(Client::connect(config.clone(), stream.compat_write()).await?)
+}
+
+/// Starts the LocalDB instance if needed and opens its named pipe. The pipe
+/// name changes on every instance start, so it is looked up each time.
+#[cfg(windows)]
+async fn localdb_pipe(instance: &str) -> Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    use tokio::net::windows::named_pipe::ClientOptions;
+
+    async fn sqllocaldb(args: &[&str]) -> Result<String> {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let out = tokio::process::Command::new("sqllocaldb")
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .await
+            .context("could not run sqllocaldb (is SQL Server Express LocalDB installed?)")?;
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        if !out.status.success() {
+            bail!("sqllocaldb {}: {}", args.join(" "), text.trim());
+        }
+        Ok(text)
+    }
+
+    sqllocaldb(&["start", instance]).await?;
+    let info = sqllocaldb(&["info", instance]).await?;
+    // The label is localized, so look for the value itself.
+    let pipe = info
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("np:"))
+        .with_context(|| format!("no pipe name in `sqllocaldb info {instance}`"))?
+        .to_owned();
+    const ERROR_PIPE_BUSY: i32 = 231;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match ClientOptions::new().open(&pipe) {
+            Ok(c) => return Ok(c),
+            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) && Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(e) => return Err(e).with_context(|| format!("could not open {pipe}")),
+        }
+    }
+}
+
+#[cfg(not(windows))]
+async fn localdb_pipe(_: &str) -> Result<TcpStream> {
+    bail!("LocalDB is only available on Windows")
 }
 
 fn is_io(e: &tiberius::error::Error) -> bool {
@@ -262,12 +322,44 @@ impl MssqlDriver {
         database: &str,
     ) -> Result<Self> {
         let mut config = Config::new();
-        config.host(&host);
-        config.port(if port == 0 { 1433 } else { port });
-        config.authentication(AuthMethod::sql_server(
-            &profile.user,
-            secrets.password.as_deref().unwrap_or(""),
-        ));
+        // SSMS-style "server\INSTANCE"; "." and "(local)" mean this machine.
+        let (server, instance) = match host.split_once('\\') {
+            Some((s, i)) => (s.trim(), i.trim()),
+            None => (host.as_str(), ""),
+        };
+        // "(localdb)\NAME" is a LocalDB instance, reached over a named pipe.
+        let localdb = server.eq_ignore_ascii_case("(localdb)").then(|| {
+            if instance.is_empty() {
+                "MSSQLLocalDB".to_owned()
+            } else {
+                instance.to_owned()
+            }
+        });
+        let server = match server {
+            _ if localdb.is_some() => "localhost",
+            "" | "." | "(local)" => "localhost",
+            s => s,
+        };
+        config.host(server);
+        // A named instance is found through SQL Browser (UDP 1434) unless
+        // the profile pins the port.
+        if localdb.is_none() && !instance.is_empty() && profile.port == 0 {
+            config.instance_name(instance);
+            config.port(1434);
+        } else {
+            config.port(if port == 0 { 1433 } else { port });
+        }
+        if profile.windows_auth {
+            #[cfg(windows)]
+            config.authentication(AuthMethod::Integrated);
+            #[cfg(not(windows))]
+            bail!("Windows authentication is only available on Windows");
+        } else {
+            config.authentication(AuthMethod::sql_server(
+                &profile.user,
+                secrets.password.as_deref().unwrap_or(""),
+            ));
+        }
         config.application_name("Tablory");
         if !database.is_empty() {
             config.database(database);
@@ -275,7 +367,11 @@ impl MssqlDriver {
         // Like the other drivers, SSL modes encrypt without verifying the
         // certificate (SQL Server ships a self-signed one by default).
         match profile.ssl_mode {
+            // LocalDB has no TLS; its pipe never leaves the machine.
             SslMode::Disable => config.encryption(EncryptionLevel::NotSupported),
+            SslMode::Prefer if localdb.is_some() => {
+                config.encryption(EncryptionLevel::NotSupported)
+            }
             SslMode::Prefer => {
                 config.encryption(EncryptionLevel::On);
                 config.trust_cert();
@@ -285,9 +381,10 @@ impl MssqlDriver {
                 config.trust_cert();
             }
         }
-        let meta = open(&config).await?;
+        let meta = open(&config, localdb.as_deref()).await?;
         Ok(Self {
             config,
+            localdb,
             meta: Mutex::new(meta),
             editor: Mutex::new(None),
             running: Default::default(),
@@ -305,7 +402,7 @@ impl MssqlDriver {
         };
         match first {
             Err(e) if is_io(&e) => {
-                *c = open(&self.config).await?;
+                *c = open(&self.config, self.localdb.as_deref()).await?;
                 Ok(c.query(sql, params).await?.into_first_result().await?)
             }
             r => Ok(r?),
@@ -479,7 +576,7 @@ impl Driver for MssqlDriver {
     async fn execute(&self, sql: &str, max_rows: usize, query_id: &str) -> Result<ExecuteResult> {
         let mut guard = self.editor.lock().await;
         if guard.is_none() {
-            let mut conn = open(&self.config).await?;
+            let mut conn = open(&self.config, self.localdb.as_deref()).await?;
             let spid: i16 = conn
                 .simple_query("SELECT @@SPID")
                 .await?
@@ -546,7 +643,7 @@ impl Driver for MssqlDriver {
                 if e.downcast_ref::<tiberius::error::Error>()
                     .is_some_and(is_io) =>
             {
-                *c = open(&self.config).await?;
+                *c = open(&self.config, self.localdb.as_deref()).await?;
                 run_batch(&mut c, sql, max_rows).await?
             }
             r => r?,

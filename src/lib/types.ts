@@ -26,6 +26,8 @@ export interface ConnectionProfile {
   ssh: SshConfig;
   uri: string;
   auth_source: string;
+  /** SQL Server: log in as the current Windows user. */
+  windows_auth: boolean;
 }
 
 /** `null` keeps the stored secret; "" clears it. */

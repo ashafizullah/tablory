@@ -56,6 +56,7 @@
       ssh: { enabled: false, host: "", port: 22, user: "", auth: "password", key_path: "" },
       uri: "",
       auth_source: "",
+      windows_auth: false,
     };
   }
 
@@ -213,7 +214,7 @@
       {#if !usesUri}
       <label for="f-host">Host</label>
       <div class="row">
-        <input id="f-host" class="field grow" bind:value={p.host} placeholder="127.0.0.1" autocapitalize="off" />
+        <input id="f-host" class="field grow" bind:value={p.host} placeholder={p.kind === "mssql" ? "localhost or localhost\\SQLEXPRESS" : "127.0.0.1"} autocapitalize="off" />
         <label for="f-port" class="inline">Port</label>
         <input
           id="f-port"
@@ -227,6 +228,15 @@
         />
       </div>
 
+      {#if p.kind === "mssql"}
+        <span class="label">Auth</span>
+        <div class="row">
+          <label class="check"><input type="radio" bind:group={p.windows_auth} value={false} /> SQL Server</label>
+          <label class="check"><input type="radio" bind:group={p.windows_auth} value={true} /> Windows</label>
+        </div>
+      {/if}
+
+      {#if !(p.kind === "mssql" && p.windows_auth)}
       <label for="f-user">User</label>
       <input id="f-user" class="field" bind:value={p.user} autocapitalize="off" placeholder={USER_HINT[p.kind] ?? ""} />
 
@@ -239,6 +249,7 @@
         oninput={() => (touched.password = true)}
         placeholder={saved ? "Saved in keychain (unchanged)" : ""}
       />
+      {/if}
 
       {/if}
 

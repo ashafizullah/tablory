@@ -141,7 +141,10 @@ async fn open(
     // A MongoDB connection string names its own hosts, so no tunnel.
     let uses_uri = profile.kind == DbKind::Mongodb && !profile.uri.trim().is_empty();
     let (tunnel, endpoint) = if profile.ssh.enabled && profile.kind != DbKind::Sqlite && !uses_uri {
-        let t = ssh::open(&profile.ssh, secrets, &host, port, known_hosts).await?;
+        // SQL Server "server\INSTANCE": the tunnel goes to the server; the
+        // instance's port must be set on the profile.
+        let target = host.split('\\').next().unwrap_or(&host);
+        let t = ssh::open(&profile.ssh, secrets, target, port, known_hosts).await?;
         let endpoint = ("127.0.0.1".to_owned(), t.local_port);
         (Some(t), endpoint)
     } else {
